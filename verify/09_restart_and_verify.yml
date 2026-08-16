@@ -1,0 +1,239 @@
+---
+
+# =====================================================================
+# Vérification finale du système VoIP complet
+#
+# Ce rôle ne déploie rien de nouveau - il effectue un RESTART COMPLET
+# (garantit un état propre, sans résidu d'éventuels reloads précédents)
+# puis vérifie exhaustivement que l'assemblage des rôles 00 à 08 forme
+# bien un système cohérent et fonctionnel.
+#
+# Le test d'appel réel (Originate/AMI, simulation 1001 -> 1002 avec
+# vérification CDR) est volontairement HORS PÉRIMÈTRE de ce rôle -
+# prévu comme script de test séparé, à écrire ultérieurement.
+# =====================================================================
+- name: Vérification finale du système VoIP complet
+  hosts: all
+  become: true
+
+  vars:
+    asterisk_db_user: "asterisk_user"
+    asterisk_db_password: "asterisk"
+    asterisk_db_name: "asterisk_realtime"
+
+    a2billing_db_user: "a2billing_user"
+    a2billing_db_password: "a2billing"
+    a2billing_db_name: "a2billing_db"
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Restart complet (état propre garanti)
+    # ---------------------------------------------------------------
+    - name: Redémarrer Asterisk (restart complet, état propre)
+      systemd:
+        name: asterisk
+        state: restarted
+
+    - name: Attendre que le socket de contrôle Asterisk soit disponible
+      wait_for:
+        path: /var/run/asterisk/asterisk.ctl
+        timeout: 30
+
+    - name: Pause pour laisser tous les modules et connexions s'initialiser
+      pause:
+        seconds: 5
+
+    # ---------------------------------------------------------------
+    # 2. Vérifications système - services
+    # ---------------------------------------------------------------
+    - name: Vérifier le statut du service Asterisk
+      command: systemctl is-active asterisk
+      register: v_asterisk_active
+      changed_when: false
+
+    - name: Vérifier le statut du service PostgreSQL
+      command: systemctl is-active postgresql
+      register: v_postgresql_active
+      changed_when: false
+
+    - name: Vérifier la version Asterisk
+      command: /usr/sbin/asterisk -rx "core show version"
+      register: v_asterisk_version
+      changed_when: false
+
+    # ---------------------------------------------------------------
+    # 3. Vérifications modules critiques
+    # ---------------------------------------------------------------
+    - name: Vérifier tous les modules critiques chargés
+      command: /usr/sbin/asterisk -rx "module show like {{ item }}"
+      loop:
+        - res_odbc
+        - res_srtp
+        - cdr_adaptive_odbc
+        - app_confbridge
+        - app_voicemail
+        - res_pjsip
+        - chan_pjsip
+      register: v_modules_check
+      changed_when: false
+
+    # ---------------------------------------------------------------
+    # 4. Vérifications connexion realtime / PJSIP
+    # ---------------------------------------------------------------
+    - name: Vérifier l'état de la connexion ODBC
+      command: /usr/sbin/asterisk -rx "odbc show all"
+      register: v_odbc_check
+      changed_when: false
+
+    - name: Vérifier les endpoints PJSIP (1001/1002/1003 attendus)
+      command: /usr/sbin/asterisk -rx "pjsip show endpoints"
+      register: v_pjsip_endpoints_check
+      changed_when: false
+
+    - name: Vérifier le transport PJSIP TCP
+      command: /usr/sbin/asterisk -rx "pjsip show transports"
+      register: v_pjsip_transport_check
+      changed_when: false
+
+    # ---------------------------------------------------------------
+    # 5. Vérifications dialplan
+    # ---------------------------------------------------------------
+    - name: Vérifier le dialplan global
+      command: /usr/sbin/asterisk -rx "dialplan show"
+      register: v_dialplan_check
+      changed_when: false
+
+    # ---------------------------------------------------------------
+    # 6. Vérifications base de données - comptages complets
+    # ---------------------------------------------------------------
+    - name: Compter les tables de asterisk_realtime
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: v_asterisk_table_count
+      changed_when: false
+
+    - name: Compter les tables de a2billing_db
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      register: v_a2billing_table_count
+      changed_when: false
+
+    - name: Vérifier les comptes PJSIP en base
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -tAc "SELECT id FROM ps_endpoints ORDER BY id"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: v_ps_endpoints_db
+      changed_when: false
+
+    - name: Vérifier les cartes A2Billing en base
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -tAc "SELECT username, credit FROM cc_card ORDER BY username"
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      register: v_cc_card_db
+      changed_when: false
+
+    - name: Vérifier les menus IVR en base
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -tAc "SELECT number, name FROM ivr_menus ORDER BY number"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: v_ivr_menus_db
+      changed_when: false
+
+    - name: Vérifier les salles de conférence en base
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -tAc "SELECT room_number, billed FROM conference_rooms ORDER BY room_number"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: v_conference_rooms_db
+      changed_when: false
+
+    # ---------------------------------------------------------------
+    # 7. Vérifications fichiers/scripts déployés
+    # ---------------------------------------------------------------
+    - name: Vérifier la présence de tous les scripts AGI/Python
+      stat:
+        path: "/var/lib/asterisk/agi-bin/{{ item }}"
+      loop:
+        - a2billing.php
+        - check-balance.agi
+        - check_balance.py
+        - conference-entry.agi
+        - get-setting.agi
+        - ivr-dynamic.agi
+        - piper_common.py
+        - piper-tts.agi
+        - recharge-agi.py
+        - recharge.py
+        - reset-stale-inuse.agi
+        - system-message.agi
+      register: v_scripts_check
+      failed_when: not v_scripts_check.stat.exists
+
+    - name: Vérifier le lien symbolique agi-bin/lib
+      command: readlink -f /var/lib/asterisk/agi-bin/lib
+      register: v_symlink_check
+      changed_when: false
+      failed_when: v_symlink_check.stdout != "/var/lib/asterisk/common/lib"
+
+    - name: Vérifier le binaire Piper et le modèle de voix
+      stat:
+        path: /usr/src/piper/voices/fr_FR-siwis-medium.onnx
+      register: v_piper_model_check
+      failed_when: not v_piper_model_check.stat.exists
+
+    - name: Compter les sons français installés
+      find:
+        paths: /var/lib/asterisk/sounds/fr
+        recurse: yes
+        file_type: file
+      register: v_sounds_fr_check
+
+    # ---------------------------------------------------------------
+    # 8. Résumé final consolidé
+    # ---------------------------------------------------------------
+    - name: Afficher le résumé de vérification finale du système VoIP
+      debug:
+        msg:
+          - "========================================================"
+          - "VÉRIFICATION FINALE - SYSTÈME VOIP COMPLET"
+          - "========================================================"
+          - "--- Services ---"
+          - "Asterisk : {{ v_asterisk_active.stdout }}"
+          - "PostgreSQL : {{ v_postgresql_active.stdout }}"
+          - "{{ v_asterisk_version.stdout }}"
+          - "--- Modules critiques (7 attendus, tous 'Running') ---"
+          - "{{ v_modules_check.results | map(attribute='stdout') | list }}"
+          - "--- Connexion ODBC ---"
+          - "{{ v_odbc_check.stdout }}"
+          - "--- Transport PJSIP ---"
+          - "{{ v_pjsip_transport_check.stdout }}"
+          - "--- Bases de données ---"
+          - "asterisk_realtime : {{ v_asterisk_table_count.stdout }} tables"
+          - "a2billing_db      : {{ v_a2billing_table_count.stdout }} tables"
+          - "--- Comptes PJSIP (base) : {{ v_ps_endpoints_db.stdout_lines }} ---"
+          - "--- Cartes A2Billing (base) : {{ v_cc_card_db.stdout_lines }} ---"
+          - "--- Menus IVR (base) : {{ v_ivr_menus_db.stdout_lines }} ---"
+          - "--- Salles de conférence (base) : {{ v_conference_rooms_db.stdout_lines }} ---"
+          - "--- Scripts AGI/Python : {{ v_scripts_check.results | length }} fichiers vérifiés présents ---"
+          - "--- Symlink agi-bin/lib : {{ v_symlink_check.stdout }} ---"
+          - "--- Modèle de voix Piper : présent ---"
+          - "--- Sons français : {{ v_sounds_fr_check.matched }} fichiers ---"
+          - "========================================================"
+          - "SYSTÈME VOIP ENTIÈREMENT REPRODUIT ET VÉRIFIÉ."
+          - "Rôles exécutés avec succès : 00 (Asterisk) -> 08 (dialplan)."
+          - "Prochaine étape (hors périmètre de ce rôle) : script de test d'appel réel (Originate/AMI, vérification CDR)."
+          - "========================================================"

@@ -1,0 +1,96 @@
+---
+
+# =====================================================================
+# Configuration ConfBridge (conférences téléphoniques _3XXX)
+#
+# Périmètre de ce rôle : uniquement confbridge.conf. Le reste de la
+# fonctionnalité ConfBridge est déjà en place depuis les rôles
+# précédents :
+#   - conference-entry.agi : copié et validé syntaxiquement (rôle 05)
+#   - table conference_rooms (salles 3000/3001, PIN, facturation) :
+#     déjà importée en base (rôle 03_database_schema.yml)
+#   - module app_confbridge.so : déjà compilé et confirmé chargé
+#     (rôle 00_asterisk_install.yml)
+#
+# Permissions confirmées sur la VM de référence (vérifiées, pas
+# supposées) : asterisk:asterisk, 0644 - différent du pattern 0640
+# utilisé pour les autres fichiers .conf réaltime (odbc/pjsip), donc
+# vérification indispensable avant copie plutôt que de deviner.
+#
+# Restart/reload : d'après la carte validée en audit (section 6),
+# "module reload app_confbridge.so" suffit - pas de restart complet
+# nécessaire (contrairement à sorcery.conf/extconfig.conf).
+# =====================================================================
+- name: Configuration ConfBridge (conférences téléphoniques)
+  hosts: all
+  become: true
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Copie de confbridge.conf
+    # ---------------------------------------------------------------
+    - name: Copier /etc/asterisk/confbridge.conf
+      copy:
+        src: files/confbridge.conf
+        dest: /etc/asterisk/confbridge.conf
+        owner: asterisk
+        group: asterisk
+        mode: '0644'
+        backup: yes
+      register: confbridge_conf_copy
+
+    # ---------------------------------------------------------------
+    # 2. Reload du module (pas de restart complet nécessaire)
+    # ---------------------------------------------------------------
+    - name: Recharger le module app_confbridge.so
+      command: /usr/sbin/asterisk -rx "module reload app_confbridge.so"
+      register: confbridge_reload
+      changed_when: "'Reloaded' in confbridge_reload.stdout or confbridge_reload.rc == 0"
+
+    - name: Petite pause pour laisser le module se recharger
+      pause:
+        seconds: 2
+
+    # ---------------------------------------------------------------
+    # 3. Vérifications finales
+    # ---------------------------------------------------------------
+    - name: Vérifier que le module app_confbridge est toujours actif après reload
+      command: /usr/sbin/asterisk -rx "module show like app_confbridge"
+      register: confbridge_module_check
+      changed_when: false
+
+    - name: Vérifier les profils ConfBridge chargés
+      command: /usr/sbin/asterisk -rx "confbridge show profile bridge default_bridge"
+      register: confbridge_bridge_profile_check
+      changed_when: false
+      failed_when: false
+
+    - name: Vérifier les profils utilisateur ConfBridge chargés
+      command: /usr/sbin/asterisk -rx "confbridge show profile user default_user"
+      register: confbridge_user_profile_check
+      changed_when: false
+      failed_when: false
+
+    - name: Vérifier les salles de conférence en base (déjà importées au rôle 03)
+      command: >-
+        psql -h 127.0.0.1 -U asterisk_user -d asterisk_realtime
+        -tAc "SELECT room_number, pin, billed FROM conference_rooms ORDER BY room_number"
+      environment:
+        PGPASSWORD: "asterisk"
+      register: conference_rooms_check
+      changed_when: false
+
+    - name: Afficher le résumé de la configuration ConfBridge
+      debug:
+        msg:
+          - "--- Module app_confbridge ---"
+          - "{{ confbridge_module_check.stdout }}"
+          - "--- Profil bridge par défaut ---"
+          - "{{ confbridge_bridge_profile_check.stdout }}"
+          - "--- Profil utilisateur par défaut ---"
+          - "{{ confbridge_user_profile_check.stdout }}"
+          - "--- Salles de conférence en base (attendu : 3000 sans PIN non facturée, 3001 PIN 1234 facturée) ---"
+          - "{{ conference_rooms_check.stdout_lines }}"
+          - "ConfBridge configuré avec succès. Fonctionnalité complète : confbridge.conf (ce rôle) + conference-entry.agi (rôle 05) + données conference_rooms (rôle 03)."
+          - "Prochaine étape : rôle 08_dialplan.yml (extensions.conf final, qui active le routage _3XXX vers conference-entry.agi)."

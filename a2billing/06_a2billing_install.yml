@@ -1,0 +1,225 @@
+---
+
+# =====================================================================
+# Installation du moteur A2Billing (PHP + code applicatif patché)
+#
+# Stratégie validée (audit IAREVIEW + vérifications complémentaires) :
+#   - PHP 8.2 + extensions : installées via apt (paquets système standards)
+#   - Composer : installé pour cohérence/traçabilité future, mais NON
+#     requis au runtime (vendor/autoload.php est déjà généré et copié
+#     tel quel - confirmé : pas de composer.json dans vendor/, pas de
+#     mécanisme composer-patches, donc rien à "construire")
+#   - common/ et vendor/ : copiés TELS QUELS (archives tar.gz), jamais
+#     régénérés - confirmé qu'aucun fichier n'a été modifié après la
+#     création d'ivr-dynamic.agi (find -newer), donc pas de patch caché
+#     en dehors des 6 fichiers déjà identifiés par l'audit section 2
+#   - Un seul lien symbolique sur toute la VM de référence (confirmé
+#     par find -type l) : agi-bin/lib -> common/lib/, à recréer ici
+#   - /var/log/a2billing/ : DOIT être créé explicitement. Confirmé que
+#     a2billing.php ne le crée pas lui-même (absent du code), et son
+#     absence ferait échouer l'écriture du log dès le premier appel
+#   - /var/lib/asterisk/sounds/a2billing/ : NON créé, confirmé inutile
+#     pour ce projet (n'existe pas sur la VM de référence qui fonctionne
+#     très bien sans - sert uniquement à l'interface web A2Billing,
+#     non installée ici, cf. résumé initial du projet)
+# =====================================================================
+- name: Installation du moteur A2Billing (PHP + code applicatif)
+  hosts: all
+  become: true
+
+  vars:
+    asterisk_common_dir: "/var/lib/asterisk/common"
+    asterisk_vendor_dir: "/var/lib/asterisk/vendor"
+    asterisk_agi_bin_dir: "/var/lib/asterisk/agi-bin"
+    a2billing_log_dir: "/var/log/a2billing"
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Installation de PHP 8.2 et des extensions (versions confirmées
+    #    identiques à la VM de référence : 8.2.32-1~deb12u1)
+    # ---------------------------------------------------------------
+    - name: Installer PHP 8.2 et les extensions requises
+      apt:
+        name:
+          - php8.2-cli
+          - php8.2-common
+          - php8.2-pgsql
+          - php8.2-mbstring
+          - php8.2-intl
+          - php8.2-opcache
+          - php8.2-readline
+        state: present
+        update_cache: yes
+      register: apt_php_result
+      retries: 5
+      delay: 15
+      until: apt_php_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Installation de Composer (non requis au runtime, installé
+    #    pour cohérence/traçabilité future uniquement)
+    # ---------------------------------------------------------------
+    - name: Installer Composer
+      apt:
+        name: composer
+        state: present
+      register: apt_composer_result
+      retries: 5
+      delay: 15
+      until: apt_composer_result is success
+
+    # ---------------------------------------------------------------
+    # 3. Déploiement de common/ (locales UI, images, javascript, lib
+    #    PHP patché) - copie fidèle, archive tar.gz
+    # ---------------------------------------------------------------
+    - name: Vérifier si common/ est déjà déployé
+      stat:
+        path: "{{ asterisk_common_dir }}/lib/Class.A2Billing.php"
+      register: common_deployed
+
+    - name: Copier et extraire common/ (18 Mo - locales, images, lib PHP patché)
+      unarchive:
+        src: files/common.tar.gz
+        dest: /var/lib/asterisk/
+        owner: asterisk
+        group: asterisk
+      when: not common_deployed.stat.exists
+
+    # ---------------------------------------------------------------
+    # 4. Déploiement de vendor/ (dépendances Composer : adodb, Smarty)
+    #    - copie fidèle, JAMAIS de composer install (cf. audit section 7)
+    # ---------------------------------------------------------------
+    - name: Vérifier si vendor/ est déjà déployé
+      stat:
+        path: "{{ asterisk_vendor_dir }}/autoload.php"
+      register: vendor_deployed
+
+    - name: Copier et extraire vendor/ (4,5 Mo - adodb patché, Smarty)
+      unarchive:
+        src: files/vendor.tar.gz
+        dest: /var/lib/asterisk/
+        owner: asterisk
+        group: asterisk
+      when: not vendor_deployed.stat.exists
+
+    # ---------------------------------------------------------------
+    # 5. Copie de a2billing.php (point d'entrée AGI principal, patché
+    #    pour compatibilité PHP 8.2)
+    # ---------------------------------------------------------------
+    - name: Copier a2billing.php
+      copy:
+        src: files/a2billing.php
+        dest: "{{ asterisk_agi_bin_dir }}/a2billing.php"
+        owner: asterisk
+        group: asterisk
+        mode: '0755'
+        backup: yes
+
+    # ---------------------------------------------------------------
+    # 6. Lien symbolique agi-bin/lib -> common/lib/ (seul symlink de
+    #    toute la VM, confirmé par find -type l sur la VM de référence)
+    # ---------------------------------------------------------------
+    - name: Recréer le lien symbolique agi-bin/lib -> common/lib/
+      file:
+        src: "{{ asterisk_common_dir }}/lib/"
+        dest: "{{ asterisk_agi_bin_dir }}/lib"
+        state: link
+        owner: root
+        group: root
+
+    # ---------------------------------------------------------------
+    # 7. Configuration /etc/a2billing.conf (connexion DB uniquement au
+    #    runtime - cf. analyse du code Class.A2Billing.php, load_conf_db
+    #    écrase les valeurs du fichier avec celles de cc_config pour
+    #    tout le reste)
+    # ---------------------------------------------------------------
+    - name: Copier /etc/a2billing.conf
+      copy:
+        src: files/a2billing.conf
+        dest: /etc/a2billing.conf
+        owner: root
+        group: asterisk
+        mode: '0640'
+        backup: yes
+
+    # ---------------------------------------------------------------
+    # 8. Dossier de logs A2Billing (NON créé automatiquement par le
+    #    code - confirmé par grep sur a2billing.php - doit être créé
+    #    explicitement ici, sinon échec à l'écriture du premier log)
+    # ---------------------------------------------------------------
+    - name: Créer le dossier de logs /var/log/a2billing/
+      file:
+        path: "{{ a2billing_log_dir }}"
+        state: directory
+        owner: asterisk
+        group: asterisk
+        mode: '0755'
+
+    # ---------------------------------------------------------------
+    # 9. Vérifications finales
+    # ---------------------------------------------------------------
+    - name: Vérifier la version de PHP installée
+      command: php -v
+      register: php_version_check
+      changed_when: false
+
+    - name: Vérifier que le lien symbolique pointe bien vers common/lib/
+      command: readlink -f {{ asterisk_agi_bin_dir }}/lib
+      register: symlink_check
+      changed_when: false
+      failed_when: symlink_check.stdout != asterisk_common_dir + "/lib"
+
+    - name: Test syntaxique de a2billing.php (php -l, sans exécution)
+      command: php -l {{ asterisk_agi_bin_dir }}/a2billing.php
+      register: a2billing_syntax_check
+      changed_when: false
+
+    - name: Test syntaxique des fichiers PHP patchés dans common/lib/
+      command: php -l {{ asterisk_common_dir }}/lib/{{ item }}
+      loop:
+        - Class.A2Billing.php
+        - Class.Connection.php
+        - Class.MytoPg.php
+        - phpagi/phpagi.php
+      register: common_lib_syntax_check
+      changed_when: false
+
+    - name: Test syntaxique du patch adodb-error.inc.php
+      command: php -l {{ asterisk_vendor_dir }}/adodb/adodb-php/adodb-error.inc.php
+      register: adodb_syntax_check
+      changed_when: false
+
+    - name: Vérifier les permissions de /etc/a2billing.conf
+      stat:
+        path: /etc/a2billing.conf
+      register: a2billing_conf_check
+      failed_when: >
+        a2billing_conf_check.stat.pw_name != 'root' or
+        a2billing_conf_check.stat.gr_name != 'asterisk'
+
+    - name: Vérifier la présence du dossier de logs
+      stat:
+        path: "{{ a2billing_log_dir }}"
+      register: log_dir_check
+      failed_when: not log_dir_check.stat.exists or not log_dir_check.stat.isdir
+
+    - name: Afficher le résumé de l'installation A2Billing
+      debug:
+        msg:
+          - "--- Version PHP ---"
+          - "{{ php_version_check.stdout_lines[0] }}"
+          - "--- Lien symbolique agi-bin/lib ---"
+          - "Pointe vers : {{ symlink_check.stdout }} (attendu : {{ asterisk_common_dir }}/lib)"
+          - "--- Test syntaxique a2billing.php ---"
+          - "{{ a2billing_syntax_check.stdout }}"
+          - "--- Test syntaxique fichiers common/lib/ patchés ---"
+          - "{{ common_lib_syntax_check.results | map(attribute='stdout') | list }}"
+          - "--- Test syntaxique adodb-error.inc.php (patché each() -> foreach) ---"
+          - "{{ adodb_syntax_check.stdout }}"
+          - "--- Permissions /etc/a2billing.conf ---"
+          - "root:asterisk, 0640 confirmé"
+          - "--- Dossier de logs ---"
+          - "{{ a2billing_log_dir }} créé (asterisk:asterisk)"
+          - "A2Billing déployé avec succès : common/ (18 Mo), vendor/ (4,5 Mo), a2billing.php, symlink, config, logs."
+          - "Rappel : aucune donnée cc_* réimportée ici (déjà fait au rôle 03_database_schema.yml)."

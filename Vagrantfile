@@ -45,9 +45,24 @@ Vagrant.configure("2") do |config|
 #  ansible.playbook = "piper/04_piper_install.yml"
 #end
 
-config.vm.provision "ansible_local" do |ansible|
-  ansible.playbook = "agi-scripts/05_agi_scripts.yml"
-end
+#config.vm.provision "ansible_local" do |ansible|
+ # ansible.playbook = "agi-scripts/05_agi_scripts.yml"
+#end
 
+#config.vm.provision "ansible_local" do |ansible|
+ # ansible.playbook = "a2billing/06_a2billing_install.yml"
+#end
+
+#config.vm.provision "ansible_local" do |ansible|
+#  ansible.playbook = "confbridge/07_confbridge_conference.yml"
+#end
+
+#config.vm.provision "ansible_local" do |ansible|
+ # ansible.playbook = "dialplan/08_dialplan.yml"
+#end
+
+config.vm.provision "ansible_local" do |ansible|
+  ansible.playbook = "verify/09_restart_and_verify.yml"
+end
 
 end
