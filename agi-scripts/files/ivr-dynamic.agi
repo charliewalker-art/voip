@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+"""
+ivr-dynamic.agi
+
+Moteur IVR dynamique. Reçoit un numéro de menu (ex: 900), va chercher sa
+structure (message d'accueil, options, services) dans PostgreSQL, joue les
+messages via Piper (module piper_common), écoute une touche DTMF, et route
+l'appel selon l'action configurée en base.
+
+Usage dans extensions.conf :
+    exten => _9XX,1,AGI(ivr-dynamic.agi,${EXTEN})
+"""
+
+import sys
+import logging
+import psycopg2
+
+sys.path.insert(0, "/var/lib/asterisk/agi-bin")
+import piper_common
+import check_balance
+import recharge
+
+LOG_FILE = "/var/log/asterisk/ivr-dynamic.log"
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+DB_CONFIG = {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "asterisk_realtime",
+    "user": "asterisk_user",
+    "password": "asterisk",
+}
+
+DTMF_DIGITS = "0123456789*#"
+
+
+# ---------------------------------------------------------------------
+# Protocole AGI
+# ---------------------------------------------------------------------
+def agi_read_env():
+    env = {}
+    while True:
+        line = sys.stdin.readline().strip()
+        if line == "":
+            break
+        if ":" in line:
+            key, value = line.split(":", 1)
+            env[key.strip()] = value.strip()
+    return env
+
+
+def agi_send(command):
+    sys.stdout.write(command + "\n")
+    sys.stdout.flush()
+    result = sys.stdin.readline().strip()
+    logging.info("AGI command: %s -> %s", command, result)
+    return result
+
+
+def parse_digit_result(agi_result):
+    """Extrait le code ASCII du digit pressé depuis une réponse AGI du type
+    '200 result=53 endpos=12345' et le convertit en caractère ('5' par ex).
+    Retourne None si aucun digit (result=0)."""
+    try:
+        result_part = agi_result.split("result=")[1]
+        code = int(result_part.split()[0])
+        if code == 0:
+            return None
+        return chr(code)
+    except (IndexError, ValueError):
+        return None
+
+
+def play_and_get_digit(text):
+    """Joue un texte (généré via Piper) en autorisant l'interruption par
+    une touche DTMF. Retourne le digit pressé, ou None si aucun."""
+    try:
+        path = piper_common.get_or_generate(text)
+    except RuntimeError as e:
+        logging.error("Erreur génération audio : %s", e)
+        return None
+    result = agi_send('STREAM FILE "%s" "%s"' % (path, DTMF_DIGITS))
+    return parse_digit_result(result)
+
+
+def wait_for_digit(timeout_seconds):
+    """Attend une touche pendant X secondes sans jouer de son."""
+    timeout_ms = timeout_seconds * 1000
+    result = agi_send("WAIT FOR DIGIT %d" % timeout_ms)
+    return parse_digit_result(result)
+
+
+# ---------------------------------------------------------------------
+# Accès base de données
+# ---------------------------------------------------------------------
+def get_menu_by_number(conn, number):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, name, welcome_text, timeout_seconds, invalid_text, max_retries, "
+            "is_voicemail_access, is_balance_check, is_recharge "
+            "FROM ivr_menus WHERE number = %s",
+            (number,),
+        )
+        return cur.fetchone()
+
+
+def get_menu_by_id(conn, menu_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, name, welcome_text, timeout_seconds, invalid_text, max_retries, "
+            "is_voicemail_access, is_balance_check, is_recharge "
+            "FROM ivr_menus WHERE id = %s",
+            (menu_id,),
+        )
+        return cur.fetchone()
+
+
+def get_options(conn, menu_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT dtmf_key, prompt_text, action_type, action_target "
+            "FROM ivr_options WHERE menu_id = %s ORDER BY dtmf_key",
+            (menu_id,),
+        )
+        return cur.fetchall()
+
+
+def get_service(conn, service_id):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT name, destination_type, destination_value "
+            "FROM ivr_services WHERE id = %s",
+            (service_id,),
+        )
+        return cur.fetchone()
+
+
+# ---------------------------------------------------------------------
+# Actions
+# ---------------------------------------------------------------------
+def execute_service_action(conn, action_target):
+    """Redirige l'appel vers un service (extension, queue, ou conférence)."""
+    service = get_service(conn, int(action_target))
+    if not service:
+        logging.error("Service introuvable : id=%s", action_target)
+        return False
+
+    name, destination_type, destination_value = service
+    logging.info("Redirection vers le service '%s' (%s: %s)", name, destination_type, destination_value)
+
+    if destination_type == "extension":
+        agi_send('EXEC Goto "from-internal,%s,1"' % destination_value)
+    elif destination_type == "queue":
+        agi_send('EXEC Queue "%s"' % destination_value)
+    elif destination_type == "conference":
+        agi_send('EXEC ConfBridge "%s"' % destination_value)
+    else:
+        logging.error("Type de destination inconnu : %s", destination_type)
+        return False
+
+    return True
+
+
+def run_menu(conn, menu_id, callerid, depth=0):
+    """Déroule un menu IVR : joue l'accueil + options, attend une touche,
+    exécute l'action correspondante. Gère les sous-menus par récursion."""
+    if depth > 5:
+        logging.error("Profondeur de sous-menu excessive, arrêt de sécurité")
+        return
+
+    menu = get_menu_by_id(conn, menu_id)
+    if not menu:
+        logging.error("Menu introuvable : id=%s", menu_id)
+        return
+
+    m_id, name, welcome_text, timeout_seconds, invalid_text, max_retries, is_voicemail_access, is_balance_check, is_recharge = menu
+
+    # Cas spécial : menu dédié à la consultation de solde ou à la recharge
+    # de compte. Délègue directement au module correspondant, sans
+    # dérouler la logique d'options/DTMF classique.
+    if is_balance_check:
+        logging.info("Menu '%s' (id=%s) : consultation de solde", name, m_id)
+        agi_send('EXEC Set "CHANNEL(language)=fr"')
+        check_balance.run(callerid)
+        return
+
+    if is_recharge:
+        logging.info("Menu '%s' (id=%s) : recharge de compte", name, m_id)
+        agi_send('EXEC Set "CHANNEL(language)=fr"')
+        recharge.run(callerid)
+        return
+
+    # Cas spécial : menu dédié à la consultation de messagerie vocale.
+    # On joue l'accueil (si défini) puis on route directement vers
+    # VoiceMailMain, sans dérouler la logique d'options/DTMF classique.
+    if is_voicemail_access:
+        logging.info("Menu '%s' (id=%s) : accès messagerie vocale", name, m_id)
+        agi_send('EXEC Set "CHANNEL(language)=fr"')
+        if welcome_text:
+            agi_send('STREAM FILE "%s" ""' % piper_common.get_or_generate(welcome_text))
+        agi_send('EXEC VoiceMailMain "${CALLERID(num)}@default"')
+        return
+
+    options = get_options(conn, m_id)
+    options_by_key = {opt[0]: opt for opt in options}
+
+    logging.info("Chargement du menu '%s' (id=%s), %d options", name, m_id, len(options))
+
+    attempts = 0
+    while attempts <= max_retries:
+        # Jouer le message d'accueil (interruptible : une touche pressée
+        # pendant ce message est prise en compte immédiatement)
+        digit = play_and_get_digit(welcome_text)
+
+        # Si pas interrompu, attendre une touche silencieusement
+        if digit is None:
+            digit = wait_for_digit(timeout_seconds)
+
+        # Aucune touche pressée du tout -> nouvelle tentative
+        if digit is None:
+            attempts += 1
+            logging.info("Aucune touche pressée (tentative %d/%d)", attempts, max_retries)
+            continue
+
+        # Touche pressée : chercher l'option correspondante
+        if digit not in options_by_key:
+            attempts += 1
+            logging.info("Touche invalide '%s' (tentative %d/%d)", digit, attempts, max_retries)
+            play_and_get_digit(invalid_text)
+            continue
+
+        _, prompt_text, action_type, action_target = options_by_key[digit]
+        logging.info("Touche '%s' -> action=%s target=%s", digit, action_type, action_target)
+
+        # Jouer le message de confirmation propre à cette option
+        # (ex: "Vous allez être mis en relation avec le commercial.")
+        if prompt_text:
+            agi_send('STREAM FILE "%s" ""' % piper_common.get_or_generate(prompt_text))
+
+        if action_type == "service":
+            execute_service_action(conn, action_target)
+            return
+        elif action_type == "submenu":
+            run_menu(conn, int(action_target), callerid, depth=depth + 1)
+            return
+        elif action_type == "repeat":
+            continue
+        elif action_type == "hangup":
+            return
+        else:
+            logging.error("Type d'action inconnu : %s", action_type)
+            return
+
+    # Nombre max de tentatives dépassé
+    logging.info("Nombre maximal de tentatives atteint, fin de l'appel")
+
+
+# ---------------------------------------------------------------------
+# Point d'entrée
+# ---------------------------------------------------------------------
+def main():
+    env = agi_read_env()
+    callerid = env.get("agi_callerid", "")
+
+    if len(sys.argv) < 2:
+        logging.error("Aucun numéro de menu fourni en argument")
+        sys.exit(1)
+
+    number = sys.argv[1]
+    logging.info("=== Nouvel appel IVR, numéro composé : %s ===", number)
+
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+    except Exception as e:
+        logging.error("Connexion PostgreSQL échouée : %s", e)
+        sys.exit(1)
+
+    try:
+        menu = get_menu_by_number(conn, number)
+        if not menu:
+            logging.error("Aucun menu trouvé pour le numéro : %s", number)
+            return
+        menu_id = menu[0]
+        run_menu(conn, menu_id, callerid)
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()

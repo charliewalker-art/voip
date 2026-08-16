@@ -1,0 +1,229 @@
+---
+
+# =====================================================================
+# Installation de PostgreSQL 15 + création des bases/utilisateurs
+# Fidèle à l'état audité (IAREVIEW) de la VM de référence :
+#   - PostgreSQL 15.18 (paquet Debian standard postgresql-15)
+#   - Locale fr_FR.UTF-8 (PAS la locale par défaut Debian !)
+#   - Deux bases : asterisk_realtime (owner asterisk_user)
+#                  a2billing_db (owner a2billing_user)
+#   - Utilisateurs NON superuser / NON createdb / NON createrole, LOGIN only
+#   - pg_hba.conf et postgresql.conf : défauts Debian, non modifiés
+#
+# NOTE (correctif) : on n'utilise PAS become_user: postgres avec les
+# modules postgresql_user/postgresql_db - ce chaînage (become root puis
+# become postgres) déclenche un bug connu de gestion des ACL sur
+# fichiers temporaires sur cette VM (chmod "A+user:postgres:rx:allow"
+# invalide). On exécute donc directement "sudo -u postgres psql ..."
+# en tant que simples commandes shell (become: true = root uniquement),
+# avec vérification manuelle d'existence pour garder l'idempotence.
+# =====================================================================
+- name: Installation PostgreSQL 15 et création des bases du projet VoIP
+  hosts: all
+  become: true
+
+  vars:
+    pg_locale: "fr_FR.UTF-8"
+
+    # Ces valeurs doivent être externalisées en Ansible Vault avant tout
+    # déploiement réel (cf. audit IAREVIEW, Correction 4 - inventaire des
+    # secrets). Laissées en clair ici uniquement pour la phase de test.
+    asterisk_db_user: "asterisk_user"
+    asterisk_db_password: "asterisk"
+    asterisk_db_name: "asterisk_realtime"
+
+    a2billing_db_user: "a2billing_user"
+    a2billing_db_password: "a2billing"
+    a2billing_db_name: "a2billing_db"
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Locale fr_FR.UTF-8 (prérequis AVANT la création des bases,
+    #    sinon CREATE DATABASE ... LOCALE 'fr_FR.UTF-8' échoue)
+    # ---------------------------------------------------------------
+    - name: S'assurer que la locale fr_FR.UTF-8 est déclarée dans /etc/locale.gen
+      lineinfile:
+        path: /etc/locale.gen
+        regexp: '^#?\s*fr_FR\.UTF-8 UTF-8'
+        line: 'fr_FR.UTF-8 UTF-8'
+      register: locale_gen_updated
+
+    - name: Générer les locales (locale-gen)
+      command: locale-gen
+      when: locale_gen_updated is changed
+
+    - name: Vérifier que la locale fr_FR.UTF-8 est bien disponible
+      command: locale -a
+      register: locale_check
+      changed_when: false
+      failed_when: "'fr_FR.utf8' not in locale_check.stdout"
+
+    # ---------------------------------------------------------------
+    # 2. Installation des paquets PostgreSQL (version Debian standard,
+    #    confirmée identique à la VM de référence : 15.18)
+    # ---------------------------------------------------------------
+    - name: Installer PostgreSQL 15 et les paquets associés
+      apt:
+        name:
+          - postgresql
+          - postgresql-15
+          - postgresql-client
+          - postgresql-client-15
+          - postgresql-client-common
+          - postgresql-common
+          - postgresql-contrib
+          - python3-psycopg2
+        state: present
+        update_cache: yes
+      register: apt_pg_result
+      retries: 5
+      delay: 15
+      until: apt_pg_result is success
+
+    - name: S'assurer que le service PostgreSQL est démarré et activé
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Attendre que PostgreSQL accepte les connexions locales
+      command: pg_isready
+      register: pg_ready
+      retries: 10
+      delay: 3
+      until: pg_ready.rc == 0
+      changed_when: false
+
+    # ---------------------------------------------------------------
+    # 3. Création des utilisateurs applicatifs (via commande directe,
+    #    pas de module postgresql_user - évite le bug ACL become_user)
+    #    NB : ni superuser, ni createdb, ni createrole - conforme à
+    #    l'audit (rolsuper=f, rolcreaterole=f, rolcreatedb=f, rolcanlogin=t)
+    # ---------------------------------------------------------------
+    - name: Vérifier si l'utilisateur asterisk_user existe déjà
+      command: >-
+        sudo -u postgres psql -tAc
+        "SELECT 1 FROM pg_roles WHERE rolname='{{ asterisk_db_user }}'"
+      register: asterisk_user_exists
+      changed_when: false
+
+    - name: Créer l'utilisateur PostgreSQL asterisk_user
+      command: >-
+        sudo -u postgres psql -c
+        "CREATE USER {{ asterisk_db_user }} WITH PASSWORD '{{ asterisk_db_password }}'
+        NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN;"
+      when: asterisk_user_exists.stdout.strip() != "1"
+
+    - name: Vérifier si l'utilisateur a2billing_user existe déjà
+      command: >-
+        sudo -u postgres psql -tAc
+        "SELECT 1 FROM pg_roles WHERE rolname='{{ a2billing_db_user }}'"
+      register: a2billing_user_exists
+      changed_when: false
+
+    - name: Créer l'utilisateur PostgreSQL a2billing_user
+      command: >-
+        sudo -u postgres psql -c
+        "CREATE USER {{ a2billing_db_user }} WITH PASSWORD '{{ a2billing_db_password }}'
+        NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN;"
+      when: a2billing_user_exists.stdout.strip() != "1"
+
+    # ---------------------------------------------------------------
+    # 4. Création des bases, chacune détenue par son propre utilisateur
+    #    (owner = asterisk_user / a2billing_user), avec la locale
+    #    fr_FR.UTF-8 confirmée par l'audit (\l+ sur la VM de référence).
+    #    C'est cette propriété qui donne implicitement à l'utilisateur
+    #    tous les droits (INSERT/SELECT/UPDATE/DELETE/...) observés dans
+    #    information_schema.role_table_grants - pas besoin de GRANT
+    #    explicite tant que les tables sont créées par ce même owner.
+    # ---------------------------------------------------------------
+    - name: Vérifier si la base asterisk_realtime existe déjà
+      command: >-
+        sudo -u postgres psql -tAc
+        "SELECT 1 FROM pg_database WHERE datname='{{ asterisk_db_name }}'"
+      register: asterisk_db_exists
+      changed_when: false
+
+    - name: Créer la base asterisk_realtime (owner asterisk_user)
+      command: >-
+        sudo -u postgres psql -c
+        "CREATE DATABASE {{ asterisk_db_name }} OWNER {{ asterisk_db_user }}
+        ENCODING 'UTF8' LC_COLLATE '{{ pg_locale }}' LC_CTYPE '{{ pg_locale }}'
+        TEMPLATE template0;"
+      when: asterisk_db_exists.stdout.strip() != "1"
+
+    - name: Vérifier si la base a2billing_db existe déjà
+      command: >-
+        sudo -u postgres psql -tAc
+        "SELECT 1 FROM pg_database WHERE datname='{{ a2billing_db_name }}'"
+      register: a2billing_db_exists
+      changed_when: false
+
+    - name: Créer la base a2billing_db (owner a2billing_user)
+      command: >-
+        sudo -u postgres psql -c
+        "CREATE DATABASE {{ a2billing_db_name }} OWNER {{ a2billing_db_user }}
+        ENCODING 'UTF8' LC_COLLATE '{{ pg_locale }}' LC_CTYPE '{{ pg_locale }}'
+        TEMPLATE template0;"
+      when: a2billing_db_exists.stdout.strip() != "1"
+
+    # ---------------------------------------------------------------
+    # 5. Vérifications finales
+    #    pg_hba.conf et postgresql.conf ne sont volontairement PAS
+    #    modifiés : l'audit a confirmé que la configuration de la VM
+    #    de référence est strictement la config par défaut Debian
+    #    (peer en local, scram-sha-256 sur 127.0.0.1/::1, port 5432,
+    #    max_connections 100, pas de listen_addresses custom).
+    # ---------------------------------------------------------------
+    - name: Vérifier la version du serveur PostgreSQL installé
+      command: sudo -u postgres psql -c "SELECT version();"
+      register: pg_version_check
+      changed_when: false
+
+    - name: Vérifier la liste des bases et de leurs propriétaires
+      command: sudo -u postgres psql -c "\l+"
+      register: pg_db_list_check
+      changed_when: false
+
+    - name: Vérifier les rôles et leurs attributs
+      command: >-
+        sudo -u postgres psql -c
+        "SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolcanlogin
+        FROM pg_roles WHERE rolname IN ('asterisk_user','a2billing_user','postgres');"
+      register: pg_roles_check
+      changed_when: false
+
+    - name: Tester la connexion applicative asterisk_user -> asterisk_realtime
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -c "SELECT current_user, current_database();"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: asterisk_conn_check
+      changed_when: false
+
+    - name: Tester la connexion applicative a2billing_user -> a2billing_db
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -c "SELECT current_user, current_database();"
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      register: a2billing_conn_check
+      changed_when: false
+
+    - name: Afficher le résumé de l'installation PostgreSQL
+      debug:
+        msg:
+          - "--- Version PostgreSQL ---"
+          - "{{ pg_version_check.stdout }}"
+          - "--- Bases et propriétaires ---"
+          - "{{ pg_db_list_check.stdout_lines }}"
+          - "--- Rôles et attributs ---"
+          - "{{ pg_roles_check.stdout_lines }}"
+          - "--- Test connexion asterisk_user ---"
+          - "{{ asterisk_conn_check.stdout }}"
+          - "--- Test connexion a2billing_user ---"
+          - "{{ a2billing_conn_check.stdout }}"
+          - "Locale fr_FR.UTF-8 confirmée disponible et appliquée aux bases."
+          - "pg_hba.conf / postgresql.conf laissés aux valeurs par défaut Debian (conforme à l'audit)."

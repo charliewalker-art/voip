@@ -1,0 +1,211 @@
+---
+
+# =====================================================================
+# Installation de Piper TTS (synthèse vocale) + modèle voix FR
+#                + sons français Asterisk
+#
+# Décision actée : téléchargement à chaque provisioning, PAS de copie
+# depuis la VM de référence - ces artefacts sont volumineux (63 Mo le
+# modèle de voix, 112 Mo Piper au total) et sont des binaires tiers
+# officiels non modifiés (pas de patch dessus), disponibles de façon
+# stable en ligne. Cohérent avec la logique retenue dans l'audit
+# IAREVIEW (copier ce qui est patché/custom, télécharger ce qui est
+# officiel et stable).
+#
+# Pièges connus (journal de configuration, section 6 et 9.5) à éviter :
+#   - Le dossier de destination des voix DOIT exister (avec sudo/droits
+#     corrects) AVANT le téléchargement, sinon les fichiers atterrissent
+#     au mauvais endroit silencieusement.
+#   - L'archive des sons FR n'a PAS de sous-dossier "fr/" à l'intérieur :
+#     il faut créer le dossier de destination AVANT d'extraire, et
+#     extraire directement DEDANS (pas à la racine de sounds/).
+#
+# Cache vocal (/var/lib/asterisk/sounds/piper-cache, piper_common.py) :
+# NON pré-rempli, volontairement. C'est un artefact généré (hash MD5
+# du texte -> fichier audio), reconstruit automatiquement et de façon
+# déterministe au premier appel. Seul le dossier est créé ici, vide,
+# avec les bonnes permissions - même logique que l'exclusion du
+# __pycache__ Python actée dans l'audit (section 1/11).
+# =====================================================================
+- name: Installation de Piper TTS, voix française et sons Asterisk FR
+  hosts: all
+  become: true
+
+  vars:
+    piper_version: "2023.11.14-2"
+    piper_tarball_url: "https://github.com/rhasspy/piper/releases/download/{{ piper_version }}/piper_linux_x86_64.tar.gz"
+    piper_install_dir: "/usr/src/piper"
+    piper_voices_dir: "{{ piper_install_dir }}/voices"
+
+    piper_voice_model_url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx"
+    piper_voice_config_url: "https://huggingface.co/rhasspy/piper-voices/resolve/main/fr/fr_FR/siwis/medium/fr_FR-siwis-medium.onnx.json"
+
+    asterisk_sounds_fr_dir: "/var/lib/asterisk/sounds/fr"
+
+    piper_cache_dir: "/var/lib/asterisk/sounds/piper-cache"
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Téléchargement et extraction de Piper (binaire)
+    # ---------------------------------------------------------------
+    - name: Vérifier si Piper est déjà installé
+      stat:
+        path: "{{ piper_install_dir }}/piper"
+      register: piper_binary
+
+    - name: Créer le dossier source /usr/src/piper
+      file:
+        path: "{{ piper_install_dir }}"
+        state: directory
+        mode: '0755'
+      when: not piper_binary.stat.exists
+
+    - name: Télécharger l'archive Piper
+      get_url:
+        url: "{{ piper_tarball_url }}"
+        dest: "/usr/src/piper_linux_x86_64.tar.gz"
+        timeout: 120
+      when: not piper_binary.stat.exists
+      register: piper_download
+      retries: 5
+      delay: 15
+      until: piper_download is success
+
+    - name: Extraire l'archive Piper
+      unarchive:
+        src: "/usr/src/piper_linux_x86_64.tar.gz"
+        dest: "/usr/src"
+        remote_src: yes
+      when: not piper_binary.stat.exists
+
+    - name: Vérifier que le binaire Piper est bien présent après extraction
+      stat:
+        path: "{{ piper_install_dir }}/piper"
+      register: piper_binary_check
+      failed_when: not piper_binary_check.stat.exists
+
+    # ---------------------------------------------------------------
+    # 2. Téléchargement du modèle de voix française
+    #    (dossier voices/ créé AVANT téléchargement - piège connu
+    #     journal §6.3 : mkdir sans droits suffisants -> fichiers
+    #     atterrissant au mauvais endroit)
+    # ---------------------------------------------------------------
+    - name: Créer le dossier des voix Piper (AVANT téléchargement)
+      file:
+        path: "{{ piper_voices_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Vérifier si le modèle de voix FR est déjà présent
+      stat:
+        path: "{{ piper_voices_dir }}/fr_FR-siwis-medium.onnx"
+      register: piper_voice_model
+
+    - name: Télécharger le modèle de voix française (.onnx)
+      get_url:
+        url: "{{ piper_voice_model_url }}"
+        dest: "{{ piper_voices_dir }}/fr_FR-siwis-medium.onnx"
+        timeout: 300
+      when: not piper_voice_model.stat.exists
+      register: voice_model_download
+      retries: 5
+      delay: 15
+      until: voice_model_download is success
+
+    - name: Télécharger le fichier de métadonnées du modèle (.onnx.json)
+      get_url:
+        url: "{{ piper_voice_config_url }}"
+        dest: "{{ piper_voices_dir }}/fr_FR-siwis-medium.onnx.json"
+        timeout: 60
+      when: not piper_voice_model.stat.exists
+      register: voice_config_download
+      retries: 5
+      delay: 15
+      until: voice_config_download is success
+
+    # ---------------------------------------------------------------
+    # 3. Sons français (Asterisk core + A2Billing)
+    #
+    # CORRECTIF (découvert après comparaison des deux VM) : le pack
+    # officiel Asterisk (asterisk-core-sounds-fr-gsm-current.tar.gz)
+    # ne contient QUE les prompts Asterisk core (~565 fichiers). Il
+    # manque tous les prompts A2Billing custom (~56 fichiers) : les
+    # "prepaid-*.gsm", les devises (dont "ariary"/"ariarys" - devise
+    # malgache, ne peut venir d'aucun pack officiel), les vouchers,
+    # etc. Confirmé par comparaison exhaustive des deux VM (audit
+    # IAREVIEW section 8 mentionnait déjà ce mélange sans le creuser).
+    #
+    # On copie donc l'intégralité de sounds/fr/ telle quelle depuis la
+    # VM de référence (comme vendor/ A2Billing) plutôt que de télécharger
+    # le pack officiel incomplet. Volume négligeable (4,4 Mo).
+    # ---------------------------------------------------------------
+    - name: Vérifier si les sons français Asterisk sont déjà installés
+      stat:
+        path: "{{ asterisk_sounds_fr_dir }}"
+      register: sounds_fr_dir_check
+
+    - name: Copier et extraire le pack de sons français complet (Asterisk core + A2Billing)
+      unarchive:
+        src: files/sounds_fr.tar.gz
+        dest: /var/lib/asterisk/sounds/
+        owner: asterisk
+        group: asterisk
+      when: not sounds_fr_dir_check.stat.exists
+
+    # ---------------------------------------------------------------
+    # 4. Dossier de cache vocal Piper - créé VIDE (artefact généré,
+    #    non versionné, cf. note en tête de fichier)
+    # ---------------------------------------------------------------
+    - name: Créer le dossier de cache vocal Piper (vide, régénéré au runtime)
+      file:
+        path: "{{ piper_cache_dir }}"
+        state: directory
+        owner: asterisk
+        group: asterisk
+        mode: '0755'
+
+    # ---------------------------------------------------------------
+    # 5. Vérifications finales
+    # ---------------------------------------------------------------
+    - name: Test de génération vocale Piper (validation fonctionnelle)
+      command: >-
+        {{ piper_install_dir }}/piper
+        --model {{ piper_voices_dir }}/fr_FR-siwis-medium.onnx
+        --output_file /tmp/piper_test.wav
+      args:
+        stdin: "Ceci est un test de synthèse vocale."
+      register: piper_test
+      changed_when: false
+
+    - name: Vérifier que le fichier audio de test a bien été généré
+      stat:
+        path: /tmp/piper_test.wav
+      register: piper_test_wav
+      failed_when: not piper_test_wav.stat.exists
+
+    - name: Compter les fichiers de sons français installés
+      find:
+        paths: "{{ asterisk_sounds_fr_dir }}"
+        recurse: yes
+        file_type: file
+      register: sounds_fr_count
+
+    - name: Nettoyer le fichier audio de test
+      file:
+        path: /tmp/piper_test.wav
+        state: absent
+
+    - name: Afficher le résumé de l'installation Piper/sons FR
+      debug:
+        msg:
+          - "--- Binaire Piper ---"
+          - "Présent : {{ piper_binary_check.stat.exists }}"
+          - "--- Modèle de voix française ---"
+          - "Taille du fichier .onnx (octets) : {{ (piper_voice_model.stat.size | default('téléchargé lors de ce run')) }}"
+          - "--- Test de génération vocale ---"
+          - "Fichier .wav généré avec succès : {{ piper_test_wav.stat.exists }}"
+          - "--- Sons français Asterisk ---"
+          - "Nombre de fichiers installés (tous niveaux) : {{ sounds_fr_count.matched }} (attendu : 419 fichiers .gsm, pack complet Asterisk core + A2Billing confirmé par comparaison exhaustive avec la VM de référence)."
+          - "--- Cache vocal Piper ---"
+          - "Dossier {{ piper_cache_dir }} créé vide (se remplit automatiquement au runtime, non versionné dans l'IaC)."

@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""
+reset-stale-inuse.agi
+
+Libère automatiquement le verrou 'inuse' d'une carte A2Billing (cc_card)
+si celui-ci est resté bloqué anormalement (ex: appel précédent interrompu
+brutalement, coupure réseau, process tué avant nettoyage propre).
+
+Ne touche QUE la carte du numéro appelant passé en argument, et UNIQUEMENT
+si le dernier appel remonte à plus de STALE_SECONDS secondes, pour ne
+jamais interrompre un appel réellement en cours.
+
+Usage dans extensions.conf, juste avant AGI(a2billing.php,1) :
+    exten => _1XXX,1,AGI(get-setting.agi,max_call_duration_seconds,MAXCALLDURATION)
+    same => n,Set(TIMEOUT(absolute)=${MAXCALLDURATION})
+    same => n,AGI(reset-stale-inuse.agi,${CALLERID(num)})
+    same => n,AGI(a2billing.php,1)
+"""
+
+import sys
+import logging
+import psycopg2
+
+LOG_FILE = "/var/log/asterisk/reset-stale-inuse.log"
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+DB_CONFIG = {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "a2billing_db",
+    "user": "a2billing_user",
+    "password": "a2billing",
+}
+
+STALE_SECONDS = 30
+
+
+def agi_read_env():
+    env = {}
+    while True:
+        line = sys.stdin.readline().strip()
+        if line == "":
+            break
+        if ":" in line:
+            key, value = line.split(":", 1)
+            env[key.strip()] = value.strip()
+    return env
+
+
+def reset_stale_inuse(conn, username):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE cc_card
+            SET inuse = 0
+            WHERE username = %s
+              AND inuse > 0
+              AND (lastuse IS NULL OR lastuse < NOW() - INTERVAL '%s seconds')
+            RETURNING id, inuse
+            """
+            % ("%s", STALE_SECONDS),
+            (username,),
+        )
+        rows = cur.fetchall()
+        conn.commit()
+        return rows
+
+
+def main():
+    agi_read_env()
+
+    if len(sys.argv) < 2 or not sys.argv[1]:
+        logging.info("Aucun numéro appelant fourni, rien à faire.")
+        sys.exit(0)
+
+    username = sys.argv[1]
+    logging.info("Vérification verrou 'inuse' périmé pour username=%s", username)
+
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+    except Exception as e:
+        logging.error("Connexion PostgreSQL échouée : %s", e)
+        sys.exit(0)
+
+    try:
+        rows = reset_stale_inuse(conn, username)
+        if rows:
+            logging.info("Verrou périmé libéré pour username=%s (%d ligne(s))", username, len(rows))
+        else:
+            logging.info("Aucun verrou périmé à libérer pour username=%s", username)
+    except Exception as e:
+        logging.error("Erreur lors de la libération du verrou : %s", e)
+    finally:
+        conn.close()
+
+
+if __name__ == "__main__":
+    main()

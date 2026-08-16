@@ -1,0 +1,245 @@
+---
+
+# =====================================================================
+# Import du schéma et des données SQL des deux bases du projet VoIP
+#
+# Fichiers sources (dumps pg_dump extraits de la VM de référence auditée) :
+#   - schema_asterisk_realtime.sql / data_asterisk_realtime.sql
+#   - schema_a2billing_db.sql      / data_a2billing_db.sql
+#
+# IMPORTANT (décisions techniques prises pour ce rôle) :
+#
+# 1. Propriété des objets : les dumps schema ont été générés avec
+#    --no-owner, donc AUCUN propriétaire n'est fixé dans les CREATE
+#    TABLE. On exécute donc les scripts EN TANT QUE l'utilisateur
+#    propriétaire réel (asterisk_user / a2billing_user), via connexion
+#    TCP+mot de passe (127.0.0.1, scram-sha-256, déjà validé au rôle 01),
+#    pas en tant que "postgres" - sinon les tables appartiendraient à
+#    postgres et on perdrait les droits implicites validés au rôle 01.
+#
+# 2. Idempotence : les dumps bruts (CREATE TABLE / INSERT INTO sans
+#    IF NOT EXISTS ni ON CONFLICT) planteraient si le playbook est
+#    rejoué sur une base déjà peuplée. On ajoute donc une vérification
+#    d'existence AVANT chaque import (table de référence pour le schéma,
+#    comptage de lignes pour les données).
+#
+# 3. Contraintes UNIQUE manquantes (audit IAREVIEW section 3) : le dump
+#    reflète l'état RÉEL de la VM de référence, qui ne possède PAS de
+#    contrainte UNIQUE sur ivr_services / cc_tariffgroup / cc_ratecard.
+#    Ce rôle importe donc une copie fidèle SANS ces contraintes (à
+#    ajouter séparément si décidé plus tard - non fait ici par défaut).
+#
+# Pas de restart/reload Asterisk nécessaire après ce rôle : les requêtes
+# realtime sont faites à la demande, sans cache, donc les nouvelles
+# données sont immédiatement visibles sans redémarrage.
+# =====================================================================
+- name: Import du schéma et des données SQL (asterisk_realtime + a2billing_db)
+  hosts: all
+  become: false
+
+  vars:
+    sql_import_dir: "/tmp/voip_sql_import"
+
+    asterisk_db_user: "asterisk_user"
+    asterisk_db_password: "asterisk"
+    asterisk_db_name: "asterisk_realtime"
+
+    a2billing_db_user: "a2billing_user"
+    a2billing_db_password: "a2billing"
+    a2billing_db_name: "a2billing_db"
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Préparation : dossier de staging + copie des 4 dumps SQL
+    # ---------------------------------------------------------------
+    - name: Créer le dossier de staging pour les dumps SQL
+      file:
+        path: "{{ sql_import_dir }}"
+        state: directory
+        mode: '0755'
+
+    - name: Copier les 4 fichiers SQL vers la VM
+      copy:
+        src: "file/{{ item }}"
+        dest: "{{ sql_import_dir }}/{{ item }}"
+        mode: '0644'
+      loop:
+        - schema_asterisk_realtime.sql
+        - schema_a2billing_db.sql
+        - data_asterisk_realtime.sql
+        - data_a2billing_db.sql
+
+    # ---------------------------------------------------------------
+    # 2. Import du schéma - asterisk_realtime
+    #    Garde-fou idempotence : on vérifie l'existence de la table
+    #    ivr_menus (spécifique au projet, ne peut pas venir d'ailleurs)
+    # ---------------------------------------------------------------
+    - name: Vérifier si le schéma asterisk_realtime est déjà importé
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='ivr_menus'"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: asterisk_schema_exists
+      changed_when: false
+
+    - name: Importer le schéma asterisk_realtime
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -v ON_ERROR_STOP=1 --single-transaction
+        -f {{ sql_import_dir }}/schema_asterisk_realtime.sql
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      when: asterisk_schema_exists.stdout.strip() != "1"
+      register: asterisk_schema_import
+
+    # ---------------------------------------------------------------
+    # 3. Import des données - asterisk_realtime
+    #    Garde-fou idempotence : on vérifie s'il y a déjà des lignes
+    #    dans ps_endpoints (table peuplée dès le premier seed)
+    # ---------------------------------------------------------------
+    - name: Vérifier si les données asterisk_realtime sont déjà importées
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -tAc "SELECT count(*) FROM ps_endpoints"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: asterisk_data_count
+      changed_when: false
+      failed_when: false
+
+    - name: Importer les données asterisk_realtime
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -v ON_ERROR_STOP=1 --single-transaction
+        -f {{ sql_import_dir }}/data_asterisk_realtime.sql
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      when: asterisk_data_count.stdout | default("0") | trim == "0"
+      register: asterisk_data_import
+
+    # ---------------------------------------------------------------
+    # 4. Import du schéma - a2billing_db
+    #    Garde-fou idempotence : on vérifie l'existence de cc_config
+    # ---------------------------------------------------------------
+    - name: Vérifier si le schéma a2billing_db est déjà importé
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='cc_config'"
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      register: a2billing_schema_exists
+      changed_when: false
+
+    - name: Importer le schéma a2billing_db
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -v ON_ERROR_STOP=1 --single-transaction
+        -f {{ sql_import_dir }}/schema_a2billing_db.sql
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      when: a2billing_schema_exists.stdout.strip() != "1"
+      register: a2billing_schema_import
+
+    # -----------------------------------------------------------------
+    # CORRECTIF (découvert au premier test d'import) : pg_dump insère
+    # en tête des fichiers de DONNÉES un "SET search_path = ''" (mesure
+    # de sécurité standard). Les fonctions trigger cc_card_serial_set()
+    # et cc_card_serial_update() référencent la table cc_card_seria SANS
+    # préfixe de schéma ("UPDATE cc_card_seria ..." au lieu de
+    # "UPDATE public.cc_card_seria ..."), donc avec un search_path vide,
+    # PostgreSQL ne trouve plus la table pourtant bien présente
+    # (ERREUR: la relation « cc_card_seria » n'existe pas).
+    # Fix standard PostgreSQL : fixer le search_path DIRECTEMENT sur la
+    # fonction, pour la rendre indépendante du search_path de session.
+    # Idempotent (peut être rejoué sans risque), donc pas de "when".
+    # -----------------------------------------------------------------
+    - name: Corriger le search_path des fonctions trigger cc_card_serial
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -v ON_ERROR_STOP=1
+        -c "{{ item }}"
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      loop:
+        - "ALTER FUNCTION public.cc_card_serial_set() SET search_path = public;"
+        - "ALTER FUNCTION public.cc_card_serial_update() SET search_path = public;"
+        - "ALTER FUNCTION public.cc_ratecard_validate_regex() SET search_path = public;"
+
+    # ---------------------------------------------------------------
+    # 5. Import des données - a2billing_db
+    #    Garde-fou idempotence : on vérifie s'il y a déjà des lignes
+    #    dans cc_config (peuplée dès le premier seed, 271 lignes attendues)
+    # ---------------------------------------------------------------
+    - name: Vérifier si les données a2billing_db sont déjà importées
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -tAc "SELECT count(*) FROM cc_config"
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      register: a2billing_data_count
+      changed_when: false
+      failed_when: false
+
+    - name: Importer les données a2billing_db
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -v ON_ERROR_STOP=1 --single-transaction
+        -f {{ sql_import_dir }}/data_a2billing_db.sql
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      when: a2billing_data_count.stdout | default("0") | trim == "0"
+      register: a2billing_data_import
+
+    # ---------------------------------------------------------------
+    # 6. Vérifications finales
+    # ---------------------------------------------------------------
+    - name: Compter les tables de asterisk_realtime
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: asterisk_table_count
+      changed_when: false
+
+    - name: Compter les tables de a2billing_db
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -tAc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public'"
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      register: a2billing_table_count
+      changed_when: false
+
+    - name: Vérifier les comptes PJSIP importés (1001/1002/1003 attendus)
+      command: >-
+        psql -h 127.0.0.1 -U {{ asterisk_db_user }} -d {{ asterisk_db_name }}
+        -tAc "SELECT id FROM ps_endpoints ORDER BY id"
+      environment:
+        PGPASSWORD: "{{ asterisk_db_password }}"
+      register: ps_endpoints_check
+      changed_when: false
+
+    - name: Vérifier les cartes A2Billing importées (1001/1002 attendues, 1003 manquant - bug connu)
+      command: >-
+        psql -h 127.0.0.1 -U {{ a2billing_db_user }} -d {{ a2billing_db_name }}
+        -tAc "SELECT username FROM cc_card ORDER BY username"
+      environment:
+        PGPASSWORD: "{{ a2billing_db_password }}"
+      register: cc_card_check
+      changed_when: false
+
+    - name: Afficher le résumé de l'import SQL
+      debug:
+        msg:
+          - "--- Nombre de tables importées ---"
+          - "asterisk_realtime : {{ asterisk_table_count.stdout }} tables"
+          - "a2billing_db      : {{ a2billing_table_count.stdout }} tables"
+          - "--- Comptes PJSIP (ps_endpoints) ---"
+          - "{{ ps_endpoints_check.stdout_lines }}"
+          - "--- Cartes A2Billing (cc_card) ---"
+          - "{{ cc_card_check.stdout_lines }}"
+          - "NOTE : le compte 1003 est présent côté PJSIP mais absent côté cc_card - bug connu et documenté par l'audit IAREVIEW, non corrigé dans cet import (copie fidèle de l'état réel)."
+          - "NOTE : les contraintes UNIQUE recommandées par l'audit sur ivr_services / cc_tariffgroup / cc_ratecard n'ont PAS été ajoutées - le schéma importé est une copie fidèle de l'état réel de la VM de référence."

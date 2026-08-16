@@ -1,0 +1,304 @@
+---
+
+# =====================================================================
+- name: Installation des composants Asterisk (sans configuration)
+  hosts: all
+  become: true
+
+  vars:
+    asterisk_version: "20"
+    asterisk_src_dir: "/usr/src"
+    asterisk_tarball_url: "https://downloads.asterisk.org/pub/telephony/asterisk/asterisk-{{ asterisk_version }}-current.tar.gz"
+
+    # --- Réseau / TLS pour WebRTC & vidéo ---
+    asterisk_external_ip: "{{ ansible_default_ipv4.address }}"
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Préparation système
+    # ---------------------------------------------------------------
+    - name: Mettre à jour le cache APT
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Ajouter des retries/timeouts APT (réseau instable)
+      copy:
+        dest: /etc/apt/apt.conf.d/80-retries
+        content: |
+          Acquire::Retries "10";
+          Acquire::http::Timeout "60";
+
+    - name: Installer les paquets de base nécessaires à la compilation
+      apt:
+        name:
+          - wget
+          - curl
+          - build-essential
+          - git
+          - subversion
+          - libnewt-dev
+          - libssl-dev
+          - libncurses5-dev
+          - libxml2-dev
+          - libsqlite3-dev
+          - uuid-dev
+          - libjansson-dev
+          - libedit-dev
+          - pkg-config
+          - sox
+          # --- Vidéo / sécurité RTP (SRTP) + base pour TLS (transport TCP chiffré) ---
+          - libsrtp2-dev
+          - ffmpeg
+          # --- Client / librairies pour se connecter à UNE base de données
+          # PostgreSQL existante (locale ou distante) - pas de serveur DB installé ici ---
+          - postgresql-client
+          - libpq-dev
+          # --- ODBC (pilote de connexion, utilisé par res_odbc/res_config_odbc) ---
+          - unixodbc
+          - unixodbc-dev
+          - odbc-postgresql
+        state: present
+      register: apt_result
+      retries: 5
+      delay: 15
+      until: apt_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Téléchargement et extraction des sources Asterisk
+    # ---------------------------------------------------------------
+    - name: Vérifier si les sources d'Asterisk sont déjà téléchargées
+      stat:
+        path: "{{ asterisk_src_dir }}/asterisk-{{ asterisk_version }}-current.tar.gz"
+      register: asterisk_tarball
+
+    - name: Télécharger les sources d'Asterisk
+      get_url:
+        url: "{{ asterisk_tarball_url }}"
+        dest: "{{ asterisk_src_dir }}/asterisk-{{ asterisk_version }}-current.tar.gz"
+        timeout: 120
+      when: not asterisk_tarball.stat.exists
+      register: download_result
+      retries: 5
+      delay: 15
+      until: download_result is success
+
+    - name: Vérifier si les sources sont déjà extraites
+      find:
+        paths: "{{ asterisk_src_dir }}"
+        patterns: "asterisk-{{ asterisk_version }}.*"
+        file_type: directory
+      register: asterisk_extracted
+
+    - name: Extraire l'archive Asterisk
+      unarchive:
+        src: "{{ asterisk_src_dir }}/asterisk-{{ asterisk_version }}-current.tar.gz"
+        dest: "{{ asterisk_src_dir }}"
+        remote_src: yes
+      when: asterisk_extracted.files | length == 0
+
+    - name: Trouver le répertoire exact des sources extraites
+      find:
+        paths: "{{ asterisk_src_dir }}"
+        patterns: "asterisk-{{ asterisk_version }}.*"
+        file_type: directory
+      register: asterisk_dir_found
+
+    - name: Définir le chemin du répertoire source
+      set_fact:
+        asterisk_build_dir: "{{ asterisk_dir_found.files[0].path }}"
+
+    # ---------------------------------------------------------------
+    # 4. Installation des prérequis spécifiques Asterisk
+    # ---------------------------------------------------------------
+    - name: Lancer le script d'installation des prérequis Asterisk
+      command: ./contrib/scripts/install_prereq install
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      register: prereq_result
+      retries: 3
+      delay: 20
+      until: prereq_result.rc == 0
+      changed_when: "'install completed successfully' in prereq_result.stdout"
+
+    # ---------------------------------------------------------------
+    # 5. Compilation et installation d'Asterisk
+    # ---------------------------------------------------------------
+    - name: Vérifier si Asterisk est déjà compilé/installé
+      stat:
+        path: /usr/sbin/asterisk
+      register: asterisk_binary
+
+    - name: Configure (./configure)
+      command: ./configure
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    # -----------------------------------------------------------------
+    # CORRECTION (suite audit IAREVIEW, section 11) :
+    # On ne reconstruit plus le menuselect.makeopts à la main module par
+    # module (risque d'oubli, ex: app_confbridge manquant dans l'ancienne
+    # version de ce script). On copie directement le fichier réel, validé,
+    # extrait de la VM de référence où Asterisk 20 + PJSIP + ConfBridge +
+    # ODBC + CDR adaptive odbc tournent effectivement en production.
+    # Ce fichier doit être placé dans files/menuselect.makeopts du rôle
+    # avant exécution (récupéré via scp depuis la VM auditée).
+    # -----------------------------------------------------------------
+    - name: Copier le menuselect.makeopts validé (état réel audité de la VM de référence)
+      copy:
+        src: files/menuselect.makeopts
+        dest: "{{ asterisk_build_dir }}/menuselect.makeopts"
+      when: not asterisk_binary.stat.exists
+
+    - name: Compiler Asterisk (make) - peut prendre 10 à 30 minutes
+      command: "make -j{{ ansible_processor_vcpus | default(2) }}"
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Installer Asterisk (make install)
+      command: make install
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Installer les fichiers de configuration exemples (make samples)
+      command: make samples
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+        creates: /etc/asterisk/asterisk.conf
+
+    - name: Installer le service init/systemd (make config)
+      command: make config
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+
+    - name: Rafraîchir le cache des librairies partagées (ldconfig)
+      command: ldconfig
+
+    # ---------------------------------------------------------------
+    # 6. Utilisateur et permissions
+    # ---------------------------------------------------------------
+    - name: Créer l'utilisateur système asterisk
+      user:
+        name: asterisk
+        system: yes
+        shell: /usr/sbin/nologin
+        home: /var/lib/asterisk
+        create_home: no
+
+    - name: Fixer les permissions des répertoires Asterisk
+      file:
+        path: "{{ item }}"
+        owner: asterisk
+        group: asterisk
+        recurse: yes
+      loop:
+        - /var/lib/asterisk
+        - /var/log/asterisk
+        - /var/spool/asterisk
+        - /etc/asterisk
+        - /var/run/asterisk
+
+    # ---------------------------------------------------------------
+    # 7. Démarrage du service Asterisk
+    # ---------------------------------------------------------------
+    - name: S'assurer qu'Asterisk est démarré et activé au boot
+      systemd:
+        name: asterisk
+        state: started
+        enabled: yes
+        daemon_reload: yes
+
+    - name: Attendre que le socket de contrôle Asterisk soit disponible
+      wait_for:
+        path: /var/run/asterisk/asterisk.ctl
+        timeout: 30
+
+    # ---------------------------------------------------------------
+    # 8. Vérifications finales (installation uniquement, pas de config)
+    # NOTE : on utilise systématiquement /usr/sbin/asterisk (chemin complet)
+    # pour éviter tout souci de PATH selon l'utilisateur/shell (ex: fish).
+    # ---------------------------------------------------------------
+    - name: Vérifier le statut du service systemd asterisk
+      command: systemctl status asterisk --no-pager
+      register: asterisk_systemctl_check
+      changed_when: false
+      failed_when: false
+
+    - name: Vérifier que le process asterisk tourne bien
+      shell: ps aux | grep '[a]sterisk'
+      register: asterisk_process_check
+      changed_when: false
+      failed_when: false
+
+    - name: Vérifier qu'Asterisk répond correctement (Test CLI)
+      command: /usr/sbin/asterisk -rx "core show version"
+      register: asterisk_version_check
+      changed_when: false
+      retries: 5
+      delay: 3
+      until: "'No such command' not in asterisk_version_check.stdout"
+
+    - name: Vérifier que le module res_srtp est bien compilé/disponible
+      command: /usr/sbin/asterisk -rx "module show like res_srtp"
+      register: srtp_check
+      changed_when: false
+
+    - name: Vérifier que le module res_odbc est bien compilé/disponible
+      command: /usr/sbin/asterisk -rx "module show like res_odbc"
+      register: odbc_module_check
+      changed_when: false
+
+    # -----------------------------------------------------------------
+    # AJOUT (suite audit IAREVIEW) : vérification app_confbridge, absente
+    # des vérifications de la version précédente de ce script alors que
+    # les conférences ConfBridge sont une fonctionnalité confirmée en
+    # production sur la VM de référence.
+    # -----------------------------------------------------------------
+    - name: Vérifier que le module app_confbridge est bien compilé/disponible
+      command: /usr/sbin/asterisk -rx "module show like app_confbridge"
+      register: confbridge_check
+      changed_when: false
+
+    - name: Vérifier que le client PostgreSQL est bien installé
+      command: psql --version
+      register: postgres_client_check
+      changed_when: false
+
+    - name: Vérifier que le pilote ODBC PostgreSQL est bien installé
+      command: odbcinst -q -d
+      register: odbc_driver_check
+      changed_when: false
+
+    - name: Vérifier les ports/sockets sur lesquels Asterisk écoute
+      shell: ss -tulnp | grep asterisk
+      register: asterisk_ports_check
+      changed_when: false
+      failed_when: false
+
+    - name: Afficher le résumé de l'installation
+      debug:
+        msg:
+          - "--- Statut du service (systemctl) ---"
+          - "{{ asterisk_systemctl_check.stdout_lines }}"
+          - "--- Process actif (ps aux) ---"
+          - "{{ asterisk_process_check.stdout }}"
+          - "--- Version Asterisk (core show version) ---"
+          - "{{ asterisk_version_check.stdout }}"
+          - "--- Module res_srtp (vidéo/chiffrement) ---"
+          - "{{ srtp_check.stdout }}"
+          - "--- Module res_odbc (pont PostgreSQL) ---"
+          - "{{ odbc_module_check.stdout }}"
+          - "--- Module app_confbridge (conférences) ---"
+          - "{{ confbridge_check.stdout }}"
+          - "--- Client PostgreSQL installé ---"
+          - "{{ postgres_client_check.stdout }}"
+          - "--- Pilotes ODBC disponibles ---"
+          - "{{ odbc_driver_check.stdout }}"
+          - "--- Ports/sockets en écoute (ss -tulnp) ---"
+          - "{{ asterisk_ports_check.stdout }}"
+          - "AUCUN serveur de base de données n'a été installé ni configuré."
+          - "AUCUNE configuration Asterisk n'a été appliquée (pjsip.conf en TCP, extensions.conf, res_odbc.conf, TLS, voicemail.conf restent à faire)."

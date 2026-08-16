@@ -1,0 +1,230 @@
+#!/usr/bin/env python3
+"""
+conference-entry.agi
+
+Point d'entrée pour les salles de conférence dynamiques (ConfBridge).
+Gère : identification de l'appelant, vérification du PIN (si requis),
+calcul de la durée max autorisée selon le crédit (si la salle est
+facturée), puis rejoint la salle ConfBridge. À la sortie (quand le
+participant quitte la salle), calcule et débite le coût réel du temps
+passé.
+
+Usage dans extensions.conf :
+    exten => _3XXX,1,Answer()
+     same => n,AGI(conference-entry.agi,${EXTEN})
+     same => n,Hangup()
+"""
+
+import sys
+import time
+import signal
+import logging
+import psycopg2
+
+# Ignore SIGHUP : Asterisk envoie ce signal quand le canal raccroche,
+# ce qui tuerait le script avant qu'il ait fini de facturer le temps passé.
+signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+sys.path.insert(0, "/var/lib/asterisk/agi-bin")
+import piper_common
+
+LOG_FILE = "/var/log/asterisk/conference-entry.log"
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+DB_CONFIG_REALTIME = {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "asterisk_realtime",
+    "user": "asterisk_user",
+    "password": "asterisk",
+}
+
+DB_CONFIG_A2BILLING = {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "a2billing_db",
+    "user": "a2billing_user",
+    "password": "a2billing",
+}
+
+MAX_PIN_TRIES = 3
+
+
+def agi_read_env():
+    env = {}
+    while True:
+        line = sys.stdin.readline().strip()
+        if line == "":
+            break
+        if ":" in line:
+            key, value = line.split(":", 1)
+            env[key.strip()] = value.strip()
+    return env
+
+
+def agi_send(command):
+    sys.stdout.write(command + "\n")
+    sys.stdout.flush()
+    result = sys.stdin.readline().strip()
+    logging.info("AGI command: %s -> %s", command, result)
+    return result
+
+
+def get_room(conn, room_number):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT id, name, pin, billed, rate_per_second, max_participants FROM conference_rooms WHERE room_number = %s",
+            (room_number,),
+        )
+        return cur.fetchone()
+
+
+def get_card_by_callerid(conn, callerid):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT cc_card.id, cc_card.credit FROM cc_callerid "
+            "JOIN cc_card ON cc_callerid.id_cc_card = cc_card.id "
+            "WHERE cc_callerid.cid = %s AND cc_callerid.activated = true",
+            (callerid,),
+        )
+        return cur.fetchone()
+
+
+def play_text(text):
+    """Joue un texte via Piper (utilise le module partagé, pas de connexion DB ici)."""
+    path = piper_common.get_or_generate(text)
+    agi_send('STREAM FILE "%s" ""' % path)
+
+
+def check_pin(room_pin):
+    """Retourne True si le PIN saisi correspond, False sinon."""
+    for attempt in range(MAX_PIN_TRIES):
+        result = agi_send('GET DATA "" 10000 10')
+        # format typique de réponse : 200 result=1234 (endpos=...)
+        try:
+            entered = result.split("result=")[1].split()[0]
+        except (IndexError, ValueError):
+            entered = ""
+        if entered == room_pin:
+            return True
+        logging.info("PIN incorrect (tentative %d/%d)", attempt + 1, MAX_PIN_TRIES)
+    return False
+
+
+def main():
+    env = agi_read_env()
+    callerid = env.get("agi_callerid", "")
+
+    if len(sys.argv) < 2:
+        logging.error("Aucun numéro de salle fourni en argument")
+        sys.exit(1)
+
+    room_number = sys.argv[1]
+    logging.info("=== Entrée conférence, salle %s, callerid %s ===", room_number, callerid)
+
+    conn_rt = psycopg2.connect(**DB_CONFIG_REALTIME)
+
+    try:
+        room = get_room(conn_rt, room_number)
+        if not room:
+            logging.error("Salle introuvable : %s", room_number)
+            play_text("Cette salle de conférence n'existe pas.")
+            return
+
+        room_id, room_name, room_pin, billed, rate_per_second, max_participants = room
+        logging.info("Salle trouvée : %s (billed=%s, rate=%s)", room_name, billed, rate_per_second)
+
+        agi_send('EXEC Set "CHANNEL(language)=fr"')
+        agi_send('EXEC Answer ""')
+        # Vérification du PIN si nécessaire
+        if room_pin:
+            play_text("Veuillez entrer le code de la salle, suivi de dièse.")
+            if not check_pin(room_pin):
+                logging.info("PIN invalide après %d tentatives, fin de l'appel", MAX_PIN_TRIES)
+                play_text("Code incorrect. Au revoir.")
+                return
+
+        # Gestion de la facturation (si applicable)
+        card_id = None
+        max_seconds = None
+        if billed:
+            conn_billing = psycopg2.connect(**DB_CONFIG_A2BILLING)
+            try:
+                card = get_card_by_callerid(conn_billing, callerid)
+                if not card:
+                    logging.error("Aucun compte facturable trouvé pour callerid=%s", callerid)
+                    play_text("Aucun compte n'est associé à votre numéro pour cette salle payante.")
+                    return
+                card_id, credit = card
+                if credit <= 0 or rate_per_second <= 0:
+                    logging.info("Crédit insuffisant ou tarif nul, refus d'accès")
+                    play_text("Vous n'avez pas assez de crédit pour rejoindre cette salle.")
+                    return
+                max_seconds = int(float(credit) / float(rate_per_second))
+                if max_seconds < 1:
+                    logging.info("Crédit insuffisant pour au moins 1 seconde (credit=%s, rate=%s), refus d'accès", credit, rate_per_second)
+                    play_text("Vous n'avez pas assez de crédit pour rejoindre cette salle.")
+                    return
+                logging.info("Crédit=%s, tarif=%s/s -> durée max autorisée=%ds", credit, rate_per_second, max_seconds)
+            finally:
+                conn_billing.close()
+
+            # Applique la limite de durée pour ne jamais dépasser le crédit disponible
+            agi_send('EXEC Set "TIMEOUT(absolute)=%d"' % max_seconds)
+
+        # Vérifie si la salle a atteint sa limite de participants (si définie)
+        if max_participants is not None:
+            count_result = agi_send('GET FULL VARIABLE "${CONFBRIDGE_INFO(parties,%s)}"' % room_number)
+            try:
+                raw_value = count_result.split("(", 1)[1].rsplit(")", 1)[0]
+                current_count = int(raw_value.strip())
+            except (IndexError, ValueError):
+                current_count = 0
+            logging.info("Salle %s : %d/%d participants", room_number, current_count, max_participants)
+            if current_count >= max_participants:
+                logging.info("Salle %s pleine, refus d'accès", room_number)
+                play_text("Cette salle de conférence est complète. Merci de réessayer plus tard.")
+                return
+        # Rejoindre la salle (bloquant jusqu'à ce que le participant quitte)
+        start_time = time.time()
+        agi_send('EXEC ConfBridge "%s,default_bridge,default_user"' % room_number)
+        elapsed_seconds = int(time.time() - start_time)
+        logging.info("Sortie de la salle après %d secondes", elapsed_seconds)
+        logging.info("DEBUG post-conference: billed=%s, card_id=%s", billed, card_id)
+
+        # Facturation réelle du temps passé
+        if billed and card_id is not None:
+            try:
+                logging.info("DEBUG: entree dans try facturation")
+                amount = round(elapsed_seconds * float(rate_per_second), 4)
+                conn_billing = psycopg2.connect(**DB_CONFIG_A2BILLING)
+                try:
+                    with conn_billing.cursor() as cur:
+                        cur.execute(
+                            "UPDATE cc_card SET credit = GREATEST(credit - %s, 0) WHERE id = %s",
+                            (amount, card_id),
+                        )
+                    conn_billing.commit()
+                finally:
+                    conn_billing.close()
+                with conn_rt.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO conference_billing_log (room_number, card_id, callerid, seconds_used, amount_charged) "
+                        "VALUES (%s, %s, %s, %s, %s)",
+                        (room_number, card_id, callerid, elapsed_seconds, amount),
+                    )
+                conn_rt.commit()
+                logging.info("Facturé %s Ar pour %ds dans la salle %s", amount, elapsed_seconds, room_number)
+            except Exception:
+                logging.exception("ERREUR lors de la facturation de la salle %s", room_number)
+
+    finally:
+        conn_rt.close()
+
+
+if __name__ == "__main__":
+    main()

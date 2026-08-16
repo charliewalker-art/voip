@@ -1,0 +1,93 @@
+#!/usr/bin/env python3
+"""
+get-setting.agi
+
+Lit une valeur depuis la table ivr_system_settings et la place dans une
+variable de canal Asterisk, utilisable ensuite dans le dialplan.
+
+Usage dans extensions.conf :
+    exten => _1XXX,1,AGI(get-setting.agi,max_call_duration_seconds,MAXCALLDURATION)
+    same => n,Set(TIMEOUT(absolute)=${MAXCALLDURATION})
+"""
+
+import sys
+import logging
+import psycopg2
+
+LOG_FILE = "/var/log/asterisk/get-setting.log"
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+DB_CONFIG = {
+    "host": "127.0.0.1",
+    "port": 5432,
+    "dbname": "asterisk_realtime",
+    "user": "asterisk_user",
+    "password": "asterisk",
+}
+
+
+def agi_read_env():
+    env = {}
+    while True:
+        line = sys.stdin.readline().strip()
+        if line == "":
+            break
+        if ":" in line:
+            key, value = line.split(":", 1)
+            env[key.strip()] = value.strip()
+    return env
+
+
+def agi_send(command):
+    sys.stdout.write(command + "\n")
+    sys.stdout.flush()
+    result = sys.stdin.readline().strip()
+    logging.info("AGI command: %s -> %s", command, result)
+    return result
+
+
+def get_setting_value(conn, setting_key):
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT setting_value FROM ivr_system_settings WHERE setting_key = %s",
+            (setting_key,),
+        )
+        row = cur.fetchone()
+        return row[0] if row else None
+
+
+def main():
+    agi_read_env()
+
+    if len(sys.argv) < 3:
+        logging.error("Usage: get-setting.agi <setting_key> <variable_name>")
+        sys.exit(1)
+
+    setting_key = sys.argv[1]
+    variable_name = sys.argv[2]
+    logging.info("Lecture du setting '%s' -> variable '%s'", setting_key, variable_name)
+
+    try:
+        conn = psycopg2.connect(**DB_CONFIG)
+    except Exception as e:
+        logging.error("Connexion PostgreSQL échouée : %s", e)
+        sys.exit(1)
+
+    try:
+        value = get_setting_value(conn, setting_key)
+    finally:
+        conn.close()
+
+    if value is None:
+        logging.error("Aucune valeur trouvée pour la clé : %s", setting_key)
+        sys.exit(1)
+
+    agi_send('SET VARIABLE "%s" "%s"' % (variable_name, value))
+
+
+if __name__ == "__main__":
+    main()

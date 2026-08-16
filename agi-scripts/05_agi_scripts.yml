@@ -1,0 +1,151 @@
+---
+
+# =====================================================================
+# Copie des scripts AGI/Python custom du projet VoIP
+#
+# Périmètre STRICT de ce rôle : uniquement les 12 fichiers présents à
+# la racine de /var/lib/asterisk/agi-bin/ (hors a2billing.php, hors le
+# lien symbolique lib/, hors common/ - tout ça relève du rôle
+# 06_a2billing_install.yml, à traiter séparément).
+#
+# Dépendances Python confirmées (audit + vérification VM de référence) :
+#   - Python 3.11.2 (paquet Debian standard python3/python3.11)
+#   - psycopg2 (python3-psycopg2, déjà installé au rôle 01_postgresql)
+#   - Tout le reste (os, hashlib, subprocess, logging, sys) = stdlib,
+#     aucune installation supplémentaire nécessaire
+#   - Confirmé : aucune dépendance installée via pip, tout passe par
+#     apt/dpkg - pas de version flottante à gérer
+#
+# Fichiers copiés (avec permissions exactes de la VM de référence) :
+#   Exécutables .agi/.py autonomes (755, asterisk:asterisk) :
+#     check-balance.agi, conference-entry.agi, get-setting.agi,
+#     ivr-dynamic.agi, piper-tts.agi, recharge-agi.py,
+#     reset-stale-inuse.agi, system-message.agi
+#   Modules Python importés, non-exécutables (644, asterisk:asterisk) :
+#     check_balance.py, piper_common.py, recharge.py
+#
+# NOTE : check-balance.agi et recharge-agi.py sont du code mort
+# documenté (anciens points d'entrée AGI remplacés par le système IVR
+# dynamique _9XX, cf. audit IAREVIEW section 11) mais sont copiés tels
+# quels par précaution, sur décision explicite - pas de suppression.
+# =====================================================================
+- name: Copie des scripts AGI/Python du projet VoIP
+  hosts: all
+  become: true
+
+  vars:
+    agi_bin_dir: "/var/lib/asterisk/agi-bin"
+
+    agi_executable_scripts:
+      - check-balance.agi
+      - conference-entry.agi
+      - get-setting.agi
+      - ivr-dynamic.agi
+      - piper-tts.agi
+      - recharge-agi.py
+      - reset-stale-inuse.agi
+      - system-message.agi
+
+    agi_module_scripts:
+      - check_balance.py
+      - piper_common.py
+      - recharge.py
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Dépendance système (Python + psycopg2) - normalement déjà
+    #    présente depuis le rôle 01, mais on s'assure explicitement
+    #    ici que ce rôle est autonome et rejouable indépendamment.
+    # ---------------------------------------------------------------
+    - name: S'assurer que python3 et python3-psycopg2 sont installés
+      apt:
+        name:
+          - python3
+          - python3-psycopg2
+        state: present
+      register: apt_python_result
+      retries: 5
+      delay: 15
+      until: apt_python_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Copie des scripts exécutables (.agi et .py autonomes)
+    # ---------------------------------------------------------------
+    - name: Copier les scripts AGI/Python exécutables
+      copy:
+        src: "files/{{ item }}"
+        dest: "{{ agi_bin_dir }}/{{ item }}"
+        owner: asterisk
+        group: asterisk
+        mode: '0755'
+        backup: yes
+      loop: "{{ agi_executable_scripts }}"
+      register: agi_exec_copy
+
+    # ---------------------------------------------------------------
+    # 3. Copie des modules Python importés (non-exécutables)
+    # ---------------------------------------------------------------
+    - name: Copier les modules Python importés
+      copy:
+        src: "files/{{ item }}"
+        dest: "{{ agi_bin_dir }}/{{ item }}"
+        owner: asterisk
+        group: asterisk
+        mode: '0644'
+        backup: yes
+      loop: "{{ agi_module_scripts }}"
+      register: agi_module_copy
+
+    # ---------------------------------------------------------------
+    # 4. Vérifications finales
+    # ---------------------------------------------------------------
+    - name: Vérifier la présence et les permissions de tous les scripts copiés
+      stat:
+        path: "{{ agi_bin_dir }}/{{ item }}"
+      loop: "{{ agi_executable_scripts + agi_module_scripts }}"
+      register: agi_files_check
+
+    - name: Vérifier explicitement que chaque fichier a le propriétaire/permissions attendus
+      assert:
+        that:
+          - agi_files_check.results[idx].stat.exists
+          - agi_files_check.results[idx].stat.pw_name == 'asterisk'
+          - agi_files_check.results[idx].stat.gr_name == 'asterisk'
+          - agi_files_check.results[idx].stat.mode == ('0755' if item in agi_executable_scripts else '0644')
+        fail_msg: "Fichier {{ item }} : propriétaire/permissions incorrects (attendu asterisk:asterisk, {{ '0755' if item in agi_executable_scripts else '0644' }})"
+      loop: "{{ agi_executable_scripts + agi_module_scripts }}"
+      loop_control:
+        index_var: idx
+        label: "{{ item }}"
+
+    - name: Vérifier que psycopg2 est bien importable par Python
+      command: python3 -c "import psycopg2; print(psycopg2.__version__)"
+      register: psycopg2_check
+      changed_when: false
+
+    # -----------------------------------------------------------------
+    # CORRECTIF : les 7 fichiers .agi sont AUSSI du Python (confirmé par
+    # "head -1 *.agi" sur la VM de référence -> shebang #!/usr/bin/env
+    # python3 partout). Le test syntaxique doit donc couvrir les 12
+    # fichiers, pas seulement les 4 .py - sinon 6 fichiers (hors
+    # recharge-agi.py déjà couvert) échappaient totalement à la
+    # vérification.
+    # -----------------------------------------------------------------
+    - name: Test syntaxique de TOUS les scripts Python (les 8 .agi + les 3 modules .py + recharge-agi.py)
+      command: python3 -m py_compile {{ agi_bin_dir }}/{{ item }}
+      loop: "{{ agi_executable_scripts + agi_module_scripts }}"
+      register: py_syntax_check
+      changed_when: false
+
+    - name: Afficher le résumé de la copie des scripts AGI/Python
+      debug:
+        msg:
+          - "--- Fichiers copiés et vérifiés (existence + propriétaire + permissions) ---"
+          - "{{ agi_files_check.results | map(attribute='stat.path') | list }}"
+          - "--- Version psycopg2 disponible ---"
+          - "{{ psycopg2_check.stdout }}"
+          - "--- Test syntaxique Python sur les 12 fichiers (les .agi sont aussi du Python, shebang confirmé) ---"
+          - "Tous les 12 scripts (8 .agi + check_balance.py + piper_common.py + recharge.py + recharge-agi.py) compilent sans erreur de syntaxe."
+          - "Permissions vérifiées explicitement : asterisk:asterisk, 0755 pour les exécutables, 0644 pour les modules importés."
+          - "Rappel : common/ (lib PHP patché) et a2billing.php seront traités dans le rôle 06_a2billing_install.yml, avec le lien symbolique lib -> common/lib/."

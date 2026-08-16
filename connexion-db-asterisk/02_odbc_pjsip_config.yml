@@ -1,0 +1,158 @@
+---
+
+# =====================================================================
+# Configuration de la connexion realtime Asterisk <-> PostgreSQL (ODBC)
+#
+# Copie telle quelle des 6 fichiers extraits et validés depuis la VM
+# de référence auditée (IAREVIEW) :
+#   - odbc.ini              : déclaration du DSN "asterisk-connector"
+#   - res_odbc.conf          : pool de connexion ODBC côté Asterisk
+#   - sorcery.conf            : mapping objets PJSIP -> realtime
+#   - extconfig.conf          : mapping tables realtime -> connexion ODBC
+#   - cdr_adaptive_odbc.conf  : CDR (référence la connexion + logique CDR)
+#   - voicemail.conf          : messagerie (référence la connexion + config)
+#
+# IMPORTANT (carte restart/reload validée en audit, section 6) :
+# sorcery.conf et extconfig.conf sont lus uniquement au démarrage du
+# noyau sorcery -> un restart COMPLET d'Asterisk est nécessaire après
+# leur modification (un simple "module reload" ne suffit pas).
+# On fait donc un restart complet du service pour l'ensemble du rôle.
+#
+# NOTE : à ce stade, aucune table n'existe encore dans les bases
+# (le rôle 03_database_schema.yml n'a pas encore été exécuté). C'est
+# normal et attendu que "pjsip show transports" ou "odbc show all"
+# ne remontent pas encore de données applicatives - seule la
+# CONNEXION elle-même est vérifiée ici, pas le contenu des tables.
+# =====================================================================
+- name: Configuration de la connexion realtime ODBC/PJSIP Asterisk
+  hosts: all
+  become: true
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Copie des fichiers de connexion (avec sauvegarde de l'existant)
+    # ---------------------------------------------------------------
+    - name: Copier /etc/odbc.ini
+      copy:
+        src: files/odbc.ini
+        dest: /etc/odbc.ini
+        owner: root
+        group: root
+        mode: '0644'
+        backup: yes
+
+    - name: Copier /etc/asterisk/res_odbc.conf
+      copy:
+        src: files/res_odbc.conf
+        dest: /etc/asterisk/res_odbc.conf
+        owner: asterisk
+        group: asterisk
+        mode: '0640'
+        backup: yes
+
+    - name: Copier /etc/asterisk/sorcery.conf
+      copy:
+        src: files/sorcery.conf
+        dest: /etc/asterisk/sorcery.conf
+        owner: asterisk
+        group: asterisk
+        mode: '0640'
+        backup: yes
+
+    - name: Copier /etc/asterisk/extconfig.conf
+      copy:
+        src: files/extconfig.conf
+        dest: /etc/asterisk/extconfig.conf
+        owner: asterisk
+        group: asterisk
+        mode: '0640'
+        backup: yes
+
+    - name: Copier /etc/asterisk/cdr_adaptive_odbc.conf
+      copy:
+        src: files/cdr_adaptive_odbc.conf
+        dest: /etc/asterisk/cdr_adaptive_odbc.conf
+        owner: asterisk
+        group: asterisk
+        mode: '0640'
+        backup: yes
+
+    - name: Copier /etc/asterisk/voicemail.conf
+      copy:
+        src: files/voicemail.conf
+        dest: /etc/asterisk/voicemail.conf
+        owner: asterisk
+        group: asterisk
+        mode: '0640'
+        backup: yes
+      register: voicemail_conf_copy
+
+    # ---------------------------------------------------------------
+    # 2. Redémarrage complet (obligatoire pour sorcery.conf/extconfig.conf)
+    # ---------------------------------------------------------------
+    - name: Redémarrer Asterisk (restart complet requis)
+      systemd:
+        name: asterisk
+        state: restarted
+
+    - name: Attendre que le socket de contrôle Asterisk soit disponible
+      wait_for:
+        path: /var/run/asterisk/asterisk.ctl
+        timeout: 30
+
+    - name: Petite pause pour laisser le temps aux modules realtime de s'initialiser
+      pause:
+        seconds: 3
+
+    # ---------------------------------------------------------------
+    # 3. Vérifications post-déploiement
+    # ---------------------------------------------------------------
+    - name: Vérifier le statut du service asterisk
+      command: systemctl is-active asterisk
+      register: asterisk_active_check
+      changed_when: false
+
+    - name: Vérifier que le module res_odbc est chargé et actif
+      command: /usr/sbin/asterisk -rx "module show like res_odbc"
+      register: res_odbc_check
+      changed_when: false
+
+    - name: Vérifier l'état des connexions ODBC (odbc show all)
+      command: /usr/sbin/asterisk -rx "odbc show all"
+      register: odbc_show_check
+      changed_when: false
+
+    - name: Vérifier que le module cdr_adaptive_odbc est chargé et actif
+      command: /usr/sbin/asterisk -rx "module show like cdr_adaptive_odbc"
+      register: cdr_odbc_check
+      changed_when: false
+
+    - name: Vérifier que le module app_voicemail est chargé et actif
+      command: /usr/sbin/asterisk -rx "module show like app_voicemail"
+      register: voicemail_module_check
+      changed_when: false
+
+    - name: Vérifier le mapping PJSIP realtime (peut être vide, normal sans schéma/données)
+      command: /usr/sbin/asterisk -rx "pjsip show transports"
+      register: pjsip_transports_check
+      changed_when: false
+      failed_when: false
+
+    - name: Afficher le résumé de la configuration ODBC/PJSIP
+      debug:
+        msg:
+          - "--- Statut du service Asterisk ---"
+          - "{{ asterisk_active_check.stdout }}"
+          - "--- Module res_odbc ---"
+          - "{{ res_odbc_check.stdout }}"
+          - "--- État des connexions ODBC (odbc show all) ---"
+          - "{{ odbc_show_check.stdout }}"
+          - "--- Module cdr_adaptive_odbc ---"
+          - "{{ cdr_odbc_check.stdout }}"
+          - "--- Module app_voicemail ---"
+          - "{{ voicemail_module_check.stdout }}"
+          - "--- PJSIP transports (vide = normal, pas encore de schéma/données - rôle 03 à venir) ---"
+          - "{{ pjsip_transports_check.stdout }}"
+          - "Fichiers de connexion realtime déployés avec succès (odbc.ini, res_odbc.conf, sorcery.conf, extconfig.conf, cdr_adaptive_odbc.conf, voicemail.conf)."
+          - "Prochaine étape : rôle 03_database_schema.yml (schema.sql + seed_data.sql)."

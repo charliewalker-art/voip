@@ -1,0 +1,66 @@
+#!/usr/bin/env python3
+"""
+piper-tts.agi
+
+Script AGI appelé depuis le dialplan Asterisk pour générer et jouer
+un message vocal via Piper TTS, avec mise en cache (via piper_common).
+
+Usage dans extensions.conf :
+    exten => s,n,AGI(piper-tts.agi,"Texte à dire",fr)
+"""
+
+import sys
+import logging
+
+sys.path.insert(0, "/var/lib/asterisk/agi-bin")
+import piper_common
+
+LOG_FILE = "/var/log/asterisk/piper-tts.log"
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+
+
+def agi_read_env():
+    env = {}
+    while True:
+        line = sys.stdin.readline().strip()
+        if line == "":
+            break
+        if ":" in line:
+            key, value = line.split(":", 1)
+            env[key.strip()] = value.strip()
+    return env
+
+
+def agi_send(command):
+    sys.stdout.write(command + "\n")
+    sys.stdout.flush()
+    result = sys.stdin.readline().strip()
+    logging.info("AGI command: %s -> %s", command, result)
+    return result
+
+
+def main():
+    agi_read_env()
+
+    if len(sys.argv) < 2:
+        logging.error("Aucun texte fourni en argument")
+        sys.exit(1)
+
+    text = sys.argv[1]
+    logging.info("Texte demandé : %s", text)
+
+    try:
+        cache_path_no_ext = piper_common.get_or_generate(text)
+    except RuntimeError as e:
+        logging.error("Erreur de génération : %s", e)
+        sys.exit(1)
+
+    agi_send('STREAM FILE "%s" ""' % cache_path_no_ext)
+
+
+if __name__ == "__main__":
+    main()
