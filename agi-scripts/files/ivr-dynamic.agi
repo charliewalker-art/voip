@@ -9,6 +9,14 @@ l'appel selon l'action configurée en base.
 
 Usage dans extensions.conf :
     exten => _9XX,1,AGI(ivr-dynamic.agi,${EXTEN})
+
+CORRECTIF : le contexte de destination pour les redirections (Goto) est
+désormais récupéré dynamiquement depuis les variables d'environnement AGI
+(agi_context), au lieu d'être codé en dur en "from-internal". Ce contexte
+n'existe plus depuis la mise en place du système de contextes dynamiques
+(le contexte réel s'appelle "internal", ou tout autre nom créé via l'API
+de gestion des contextes). Coder le contexte en dur casse le routage dès
+que le nom du contexte change.
 """
 
 import sys
@@ -142,18 +150,24 @@ def get_service(conn, service_id):
 # ---------------------------------------------------------------------
 # Actions
 # ---------------------------------------------------------------------
-def execute_service_action(conn, action_target):
-    """Redirige l'appel vers un service (extension, queue, ou conférence)."""
+def execute_service_action(conn, action_target, context):
+    """Redirige l'appel vers un service (extension, queue, ou conférence).
+
+    Le paramètre `context` provient de agi_context (récupéré dans main()),
+    PAS d'une valeur codée en dur - indispensable pour rester compatible
+    avec le système de contextes dynamiques (le nom du contexte varie
+    selon la configuration active : "internal", "vip", etc.)."""
     service = get_service(conn, int(action_target))
     if not service:
         logging.error("Service introuvable : id=%s", action_target)
         return False
 
     name, destination_type, destination_value = service
-    logging.info("Redirection vers le service '%s' (%s: %s)", name, destination_type, destination_value)
+    logging.info("Redirection vers le service '%s' (%s: %s) dans le contexte '%s'",
+                 name, destination_type, destination_value, context)
 
     if destination_type == "extension":
-        agi_send('EXEC Goto "from-internal,%s,1"' % destination_value)
+        agi_send('EXEC Goto "%s,%s,1"' % (context, destination_value))
     elif destination_type == "queue":
         agi_send('EXEC Queue "%s"' % destination_value)
     elif destination_type == "conference":
@@ -165,9 +179,14 @@ def execute_service_action(conn, action_target):
     return True
 
 
-def run_menu(conn, menu_id, callerid, depth=0):
+def run_menu(conn, menu_id, callerid, context, depth=0):
     """Déroule un menu IVR : joue l'accueil + options, attend une touche,
-    exécute l'action correspondante. Gère les sous-menus par récursion."""
+    exécute l'action correspondante. Gère les sous-menus par récursion.
+
+    `context` est transmis depuis main() (valeur agi_context) et propagé
+    à travers toute la récursion des sous-menus, pour que chaque
+    redirection finale (execute_service_action) utilise le bon contexte
+    Asterisk réel, quel que soit son nom."""
     if depth > 5:
         logging.error("Profondeur de sous-menu excessive, arrêt de sécurité")
         return
@@ -242,10 +261,10 @@ def run_menu(conn, menu_id, callerid, depth=0):
             agi_send('STREAM FILE "%s" ""' % piper_common.get_or_generate(prompt_text))
 
         if action_type == "service":
-            execute_service_action(conn, action_target)
+            execute_service_action(conn, action_target, context)
             return
         elif action_type == "submenu":
-            run_menu(conn, int(action_target), callerid, depth=depth + 1)
+            run_menu(conn, int(action_target), callerid, context, depth=depth + 1)
             return
         elif action_type == "repeat":
             continue
@@ -265,13 +284,17 @@ def run_menu(conn, menu_id, callerid, depth=0):
 def main():
     env = agi_read_env()
     callerid = env.get("agi_callerid", "")
+    # CORRECTIF : contexte récupéré dynamiquement (plus de "from-internal"
+    # codé en dur). Fallback sur "internal" si jamais la variable AGI
+    # n'était pas fournie (ne devrait normalement pas arriver).
+    context = env.get("agi_context", "internal")
 
     if len(sys.argv) < 2:
         logging.error("Aucun numéro de menu fourni en argument")
         sys.exit(1)
 
     number = sys.argv[1]
-    logging.info("=== Nouvel appel IVR, numéro composé : %s ===", number)
+    logging.info("=== Nouvel appel IVR, numéro composé : %s (contexte: %s) ===", number, context)
 
     try:
         conn = psycopg2.connect(**DB_CONFIG)
@@ -285,7 +308,7 @@ def main():
             logging.error("Aucun menu trouvé pour le numéro : %s", number)
             return
         menu_id = menu[0]
-        run_menu(conn, menu_id, callerid)
+        run_menu(conn, menu_id, callerid, context)
     finally:
         conn.close()
 

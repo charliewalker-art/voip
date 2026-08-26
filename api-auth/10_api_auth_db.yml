@@ -1,0 +1,173 @@
+---
+
+# =====================================================================
+# Création de la base d'authentification de l'API Spring Boot
+#
+# Base VOLONTAIREMENT séparée des bases métier VoIP (asterisk_realtime,
+# a2billing_db) - responsabilité distincte (gestion des accès à l'API
+# elle-même, rien à voir avec la téléphonie ou la facturation).
+#
+# Cohérent avec le principe de séparation des responsabilités déjà
+# appliqué dans tout le playbook (un rôle = une responsabilité).
+#
+# Même méthode que le rôle 01_postgresql_install.yml : locale fr_FR.UTF-8,
+# utilisateur non-superuser/non-createdb/non-createrole, création via
+# commandes directes "sudo -u postgres psql" (pas de modules
+# postgresql_user/postgresql_db - évite le bug ACL become_user déjà
+# rencontré et documenté au rôle 01).
+# =====================================================================
+- name: Création de la base d'authentification de l'API
+  hosts: all
+  become: true
+
+  vars:
+    pg_locale: "fr_FR.UTF-8"
+
+    # À externaliser en Ansible Vault avant tout déploiement réel
+    # (même remarque que pour les autres bases, cf. audit IAREVIEW
+    # Correction 4 - inventaire des secrets)
+    api_db_user: "api_user"
+    api_db_password: "changeme_api"
+    api_db_name: "api_auth_db"
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Locale (déjà générée par le rôle 01 en théorie, mais ce rôle
+    #    reste autonome et rejouable indépendamment)
+    # ---------------------------------------------------------------
+    - name: S'assurer que la locale fr_FR.UTF-8 est déclarée dans /etc/locale.gen
+      lineinfile:
+        path: /etc/locale.gen
+        regexp: '^#?\s*fr_FR\.UTF-8 UTF-8'
+        line: 'fr_FR.UTF-8 UTF-8'
+      register: locale_gen_updated
+
+    - name: Générer les locales (locale-gen)
+      command: locale-gen
+      when: locale_gen_updated is changed
+
+    # ---------------------------------------------------------------
+    # 2. Attente de la disponibilité du cluster PostgreSQL
+    #    (le service est déjà installé/démarré par le rôle 01)
+    # ---------------------------------------------------------------
+    - name: Attendre que PostgreSQL accepte les connexions locales
+      command: pg_isready
+      register: pg_ready
+      retries: 10
+      delay: 3
+      until: pg_ready.rc == 0
+      changed_when: false
+
+    # ---------------------------------------------------------------
+    # 3. Création de l'utilisateur api_user
+    # ---------------------------------------------------------------
+    - name: Vérifier si l'utilisateur api_user existe déjà
+      command: >-
+        sudo -u postgres psql -tAc
+        "SELECT 1 FROM pg_roles WHERE rolname='{{ api_db_user }}'"
+      register: api_user_exists
+      changed_when: false
+
+    - name: Créer l'utilisateur PostgreSQL api_user
+      command: >-
+        sudo -u postgres psql -c
+        "CREATE USER {{ api_db_user }} WITH PASSWORD '{{ api_db_password }}'
+        NOSUPERUSER NOCREATEDB NOCREATEROLE LOGIN;"
+      when: api_user_exists.stdout.strip() != "1"
+
+    # ---------------------------------------------------------------
+    # 4. Création de la base api_auth_db (owner api_user)
+    # ---------------------------------------------------------------
+    - name: Vérifier si la base api_auth_db existe déjà
+      command: >-
+        sudo -u postgres psql -tAc
+        "SELECT 1 FROM pg_database WHERE datname='{{ api_db_name }}'"
+      register: api_db_exists
+      changed_when: false
+
+    - name: Créer la base api_auth_db (owner api_user)
+      command: >-
+        sudo -u postgres psql -c
+        "CREATE DATABASE {{ api_db_name }} OWNER {{ api_db_user }}
+        ENCODING 'UTF8' LC_COLLATE '{{ pg_locale }}' LC_CTYPE '{{ pg_locale }}'
+        TEMPLATE template0;"
+      when: api_db_exists.stdout.strip() != "1"
+
+    # ---------------------------------------------------------------
+    # 5. Création de la table api_users + seed du premier admin
+    #    (fichiers SQL externalisés dans files/, même logique que le
+    #    rôle 03_database_schema.yml - schema.sql / seed_data.sql
+    #    séparés, pas de SQL en dur dans le playbook)
+    # ---------------------------------------------------------------
+    - name: Créer le dossier de staging pour les fichiers SQL
+      file:
+        path: /tmp/api_auth_sql
+        state: directory
+        mode: '0755'
+
+    - name: Copier les fichiers SQL (schéma + seed utilisateur)
+      copy:
+        src: "files/{{ item }}"
+        dest: "/tmp/api_auth_sql/{{ item }}"
+        mode: '0644'
+      loop:
+        - schema.sql
+        - seed_user.sql
+
+    - name: Vérifier si la table api_users existe déjà
+      command: >-
+        psql -h 127.0.0.1 -U {{ api_db_user }} -d {{ api_db_name }}
+        -tAc "SELECT 1 FROM information_schema.tables WHERE table_name='api_users'"
+      environment:
+        PGPASSWORD: "{{ api_db_password }}"
+      register: api_users_table_exists
+      changed_when: false
+
+    - name: Importer le schéma api_users
+      command: >-
+        psql -h 127.0.0.1 -U {{ api_db_user }} -d {{ api_db_name }}
+        -v ON_ERROR_STOP=1 --single-transaction
+        -f /tmp/api_auth_sql/schema.sql
+      environment:
+        PGPASSWORD: "{{ api_db_password }}"
+      when: api_users_table_exists.stdout.strip() != "1"
+
+    - name: Importer le seed du premier utilisateur admin (idempotent, ON CONFLICT DO NOTHING)
+      command: >-
+        psql -h 127.0.0.1 -U {{ api_db_user }} -d {{ api_db_name }}
+        -v ON_ERROR_STOP=1
+        -f /tmp/api_auth_sql/seed_user.sql
+      environment:
+        PGPASSWORD: "{{ api_db_password }}"
+
+    # ---------------------------------------------------------------
+    # 6. Vérifications finales
+    # ---------------------------------------------------------------
+    - name: Vérifier la structure de la table api_users
+      command: >-
+        psql -h 127.0.0.1 -U {{ api_db_user }} -d {{ api_db_name }} -c "\d api_users"
+      environment:
+        PGPASSWORD: "{{ api_db_password }}"
+      register: api_users_structure_check
+      changed_when: false
+
+    - name: Tester la connexion applicative api_user -> api_auth_db
+      command: >-
+        psql -h 127.0.0.1 -U {{ api_db_user }} -d {{ api_db_name }}
+        -c "SELECT current_user, current_database();"
+      environment:
+        PGPASSWORD: "{{ api_db_password }}"
+      register: api_conn_check
+      changed_when: false
+
+    - name: Afficher le résumé de la création de la base d'authentification
+      debug:
+        msg:
+          - "--- Base api_auth_db créée, séparée des bases métier VoIP ---"
+          - "--- Structure de api_users ---"
+          - "{{ api_users_structure_check.stdout }}"
+          - "--- Test connexion api_user ---"
+          - "{{ api_conn_check.stdout }}"
+          - "Base d'authentification prête. Aucune donnée métier VoIP mélangée (asterisk_realtime et a2billing_db restent inchangées)."
+          - "Utilisateur admin amorcé automatiquement (username: admin, mot de passe initial: admin123 - À CHANGER après le premier login)."

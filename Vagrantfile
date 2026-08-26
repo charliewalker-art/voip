@@ -61,8 +61,22 @@ Vagrant.configure("2") do |config|
  # ansible.playbook = "dialplan/08_dialplan.yml"
 #end
 
+#config.vm.provision "ansible_local" do |ansible|
+#  ansible.playbook = "verify/09_restart_and_verify.yml"
+#end
+
+#config.vm.provision "ansible_local" do |ansible|
+ # ansible.playbook = "api-auth/10_api_auth_db.yml"
+#end
+
+
 config.vm.provision "ansible_local" do |ansible|
-  ansible.playbook = "verify/09_restart_and_verify.yml"
+  ansible.playbook = "installation-docker/install_docker.yml"
 end
+
+config.vm.provision "ansible_local" do |ansible|
+  ansible.playbook = "timezone/timezone_config.yml"
+end
+
 
 end

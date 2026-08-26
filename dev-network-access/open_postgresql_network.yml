@@ -1,0 +1,104 @@
+---
+
+# =====================================================================
+# [DEV UNIQUEMENT - NON DESTINÉ À LA PRODUCTION]
+#
+# Ouvre l'accès réseau à PostgreSQL depuis l'extérieur de la VM
+# (listen_addresses = '*' + règle pg_hba.conf sur le sous-réseau
+# Vagrant local), pour permettre à un IDE (IntelliJ) ou un client
+# psql tournant sur la machine hôte Windows de se connecter aux 3
+# bases pendant le développement de l'API Spring Boot.
+#
+# CE RÔLE N'EST PAS NUMÉROTÉ DANS LA SÉQUENCE 00-10 : il ne fait PAS
+# partie du déploiement de production du système VoIP. En production,
+# l'API tournera SUR le serveur (ou dans le même réseau privé
+# de confiance), donc PostgreSQL peut/doit rester restreint à
+# 127.0.0.1 comme le configure le rôle 01_postgresql_install.yml -
+# ne jamais exécuter ce rôle sur un serveur de production exposé.
+#
+# À exécuter manuellement quand nécessaire (pas dans le Vagrantfile
+# par défaut) :
+#   vagrant ssh -c "cd /vagrant && ansible-playbook dev-network-access/open_postgresql_network.yml"
+# ou via ansible_local en décommentant temporairement dans le Vagrantfile.
+# =====================================================================
+- name: "[DEV] Ouvrir l'accès réseau externe à PostgreSQL"
+  hosts: all
+  become: true
+
+  vars:
+    pg_conf_dir: "/etc/postgresql/15/main"
+    dev_subnet: "192.168.0.0/24"
+
+  tasks:
+
+    - name: Vérifier l'état actuel de listen_addresses
+      command: grep "^listen_addresses" "{{ pg_conf_dir }}/postgresql.conf"
+      register: listen_addresses_current
+      changed_when: false
+      failed_when: false
+
+    - name: Modifier listen_addresses pour écouter sur toutes les interfaces
+      lineinfile:
+        path: "{{ pg_conf_dir }}/postgresql.conf"
+        regexp: "^#?listen_addresses\\s*="
+        line: "listen_addresses = '*'"
+        backup: yes
+      register: listen_addresses_updated
+
+    - name: Vérifier si la règle réseau dev existe déjà dans pg_hba.conf
+      command: grep -F "{{ dev_subnet }}" "{{ pg_conf_dir }}/pg_hba.conf"
+      register: pg_hba_rule_exists
+      changed_when: false
+      failed_when: false
+
+    - name: Ajouter la règle d'accès réseau dev dans pg_hba.conf (scram-sha-256, cohérent avec le reste du fichier)
+      lineinfile:
+        path: "{{ pg_conf_dir }}/pg_hba.conf"
+        line: "host    all    all    {{ dev_subnet }}    scram-sha-256"
+        insertafter: EOF
+        backup: yes
+      when: pg_hba_rule_exists.rc != 0
+      register: pg_hba_updated
+
+    - name: Redémarrer PostgreSQL si une modification a été appliquée
+      systemd:
+        name: postgresql
+        state: restarted
+      when: listen_addresses_updated is changed or pg_hba_updated is changed
+
+    - name: Attendre que PostgreSQL soit de nouveau prêt
+      command: pg_isready
+      register: pg_ready
+      retries: 10
+      delay: 2
+      until: pg_ready.rc == 0
+      changed_when: false
+
+    - name: Vérifier que PostgreSQL écoute bien sur toutes les interfaces
+      command: ss -tlnp
+      register: ss_check
+      changed_when: false
+
+    - name: Récupérer l'adresse IP réseau de la VM (interface privée Vagrant)
+      command: hostname -I
+      register: vm_ip_check
+      changed_when: false
+
+    - name: Afficher le résumé de l'ouverture d'accès réseau
+      debug:
+        msg:
+          - "========================================================"
+          - "[DEV] ACCÈS RÉSEAU POSTGRESQL OUVERT"
+          - "========================================================"
+          - "listen_addresses = '*' appliqué."
+          - "Règle pg_hba.conf ajoutée pour {{ dev_subnet }} (scram-sha-256)."
+          - "--- Ports en écoute (vérifier 0.0.0.0:5432) ---"
+          - "{{ ss_check.stdout_lines | select('search', '5432') | list }}"
+          - "--- Adresse(s) IP de la VM (utiliser dans .env / IntelliJ) ---"
+          - "{{ vm_ip_check.stdout }}"
+          - "========================================================"
+          - "RAPPEL : ce rôle est réservé au développement local. Ne"
+          - "JAMAIS l'exécuter sur un serveur de production exposé sur"
+          - "internet - PostgreSQL doit y rester restreint à 127.0.0.1"
+          - "(configuration par défaut du rôle 01_postgresql_install.yml)."
+          - "========================================================"

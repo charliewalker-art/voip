@@ -1,0 +1,69 @@
+---
+
+# =====================================================================
+# Configuration du fuseau horaire et de la synchronisation NTP
+#
+# Corrige un décalage constaté entre l'heure système de la VM
+# (par défaut UTC ou Europe/Paris selon la box) et l'heure réelle de
+# l'utilisateur (Madagascar, UTC+3 - Indian/Antananarivo, EAT).
+#
+# Sans ce rôle, le décalage réapparaît à chaque reconstruction de VM
+# (vagrant destroy + vagrant up), puisque le fuseau horaire par défaut
+# de la box n'est pas Indian/Antananarivo.
+#
+# Ce réglage impacte directement tous les horodatages du système :
+# CDR (asterisk_realtime.cdr.start/answer/end), logs A2Billing,
+# conference_billing_log.call_date, cc_logrefill.date, etc. Un mauvais
+# fuseau horaire fausserait silencieusement toutes ces données.
+# =====================================================================
+- name: Configuration du fuseau horaire (Indian/Antananarivo) et NTP
+  hosts: all
+  become: true
+
+  vars:
+    target_timezone: "Indian/Antananarivo"
+
+  tasks:
+
+    - name: Vérifier le fuseau horaire actuellement configuré
+      command: timedatectl show --property=Timezone --value
+      register: current_timezone
+      changed_when: false
+
+    - name: Définir le fuseau horaire sur {{ target_timezone }}
+      command: timedatectl set-timezone {{ target_timezone }}
+      when: current_timezone.stdout.strip() != target_timezone
+
+    - name: Activer la synchronisation NTP
+      command: timedatectl set-ntp true
+      register: ntp_enable
+      changed_when: "'true' not in ntp_enable.stdout"
+      failed_when: false
+
+    - name: Attendre que l'horloge soit synchronisée (jusqu'à 15 secondes)
+      command: timedatectl show --property=NTPSynchronized --value
+      register: ntp_sync_check
+      retries: 5
+      delay: 3
+      until: ntp_sync_check.stdout.strip() == "yes"
+      changed_when: false
+      failed_when: false
+
+    - name: Récupérer l'état final complet (timedatectl)
+      command: timedatectl
+      register: timedatectl_final
+      changed_when: false
+
+    - name: Récupérer la date/heure actuelle du système
+      command: date
+      register: date_final
+      changed_when: false
+
+    - name: Afficher le résumé de la configuration horaire
+      debug:
+        msg:
+          - "--- État final (timedatectl) ---"
+          - "{{ timedatectl_final.stdout_lines }}"
+          - "--- Date/heure actuelle du système ---"
+          - "{{ date_final.stdout }}"
+          - "Fuseau horaire configuré : {{ target_timezone }} (persistant, survit aux reconstructions de VM)."
