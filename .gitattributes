@@ -1,0 +1,34 @@
+# =====================================================================
+# Normalisation des fins de ligne pour le projet VoIP (Vagrant/Ansible)
+#
+# Objectif : que tous les scripts AGI/Python restent en LF quel que
+# soit l'OS du contributeur (Windows, macOS, Linux), pour éviter que
+# le shebang casse à l'exécution sur la VM Debian cible.
+#
+# `text=auto` laisse Git détecter le texte, mais on force explicitement
+# LF (eol=lf) sur les types de fichiers concernés par ce projet plutôt
+# que de dépendre de core.autocrlf côté client, qui est une config
+# locale non versionnée et donc non fiable pour tous les contributeurs.
+# =====================================================================
+
+# Règle générale : normaliser tout fichier texte, fins de ligne LF
+* text=auto eol=lf
+
+# Scripts AGI et Python : LF forcé, indispensable pour le shebang
+*.agi text eol=lf
+*.py  text eol=lf
+
+# Playbooks et fichiers Ansible/YAML
+*.yml  text eol=lf
+*.yaml text eol=lf
+
+# Fichiers shell
+*.sh text eol=lf
+
+# Fichiers binaires : ne jamais toucher (évite toute corruption)
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.pdf  binary
+*.zip  binary

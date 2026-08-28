@@ -71,7 +71,7 @@
     # ---------------------------------------------------------------
     # 4. Vérifications finales
     # ---------------------------------------------------------------
-    - name: Vérifier le contexte internal (contient tout : _1XXX, _3XXX, 900/960/961/970)
+    - name: "Vérifier le contexte internal (contient tout : _1XXX, _3XXX, 900/960/961/970)"
       command: /usr/sbin/asterisk -rx "dialplan show internal"
       register: internal_context_check
       changed_when: false

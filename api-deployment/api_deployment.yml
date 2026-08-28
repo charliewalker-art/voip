@@ -1,5 +1,3 @@
----
-
 # =====================================================================
 # Déploiement de l'API VoIP + frontend via Docker Compose
 #
@@ -75,24 +73,17 @@
         mode: '0755'
 
     # ---------------------------------------------------------------
-    # 4. Tirer les dernières images depuis GHCR
+    # 4. Tirer les dernières images depuis GHCR (ligne de commande directe)
     # ---------------------------------------------------------------
     - name: Tirer les images Docker définies dans docker-compose.yml
-      community.docker.docker_compose_v2_pull:
-        project_src: "{{ deployment_dir }}"
-      register: images_pull
-      ignore_errors: true
-
-    - name: (Repli) Tirer les images via docker compose pull en ligne de commande
       command: docker compose pull
       args:
         chdir: "{{ deployment_dir }}"
-      when: images_pull is failed
-      register: images_pull_fallback
+      register: images_pull
 
     # ---------------------------------------------------------------
     # 5. Démarrer/mettre à jour les containers
-    #    NOTE : on ne PAS attendre/vérifier que les containers soient
+    #    NOTE : on ne va PAS attendre/vérifier que les containers soient
     #    réellement démarrés et fonctionnels - l'IP/configuration réseau
     #    (.env) peut varier selon l'environnement de déploiement, donc un
     #    healthcheck bloquant ici donnerait de faux échecs. Le script se

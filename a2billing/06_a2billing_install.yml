@@ -22,6 +22,20 @@
 #     pour ce projet (n'existe pas sur la VM de référence qui fonctionne
 #     très bien sans - sert uniquement à l'interface web A2Billing,
 #     non installée ici, cf. résumé initial du projet)
+#
+# CORRECTIF CRLF/LF : common.tar.gz et vendor.tar.gz peuvent avoir été
+# constitués sur une machine Windows, et a2billing.php / a2billing.conf
+# sont copiés depuis la machine de contrôle Ansible (elle aussi Windows
+# dans ce projet). PHP tolère en général le CRLF dans le corps d'un
+# script, MAIS deux points cassent avec CRLF :
+#   - un éventuel shebang en tête de a2billing.php (#!/usr/bin/php\r)
+#   - le parsing INI-like de a2billing.conf (parse_ini_file peut laisser
+#     des \r en fin de valeur, ce qui casse les comparaisons de chaînes
+#     dans Class.A2Billing.php)
+# On applique donc dos2unix de façon ciblée : uniquement sur les
+# fichiers texte (.php, .inc, .conf), jamais sur common/ dans son
+# ensemble puisque ce dossier contient aussi des images et des
+# locales binaires qui seraient corrompues par une conversion aveugle.
 # =====================================================================
 - name: Installation du moteur A2Billing (PHP + code applicatif)
   hosts: all
@@ -32,14 +46,16 @@
     asterisk_vendor_dir: "/var/lib/asterisk/vendor"
     asterisk_agi_bin_dir: "/var/lib/asterisk/agi-bin"
     a2billing_log_dir: "/var/log/a2billing"
+    a2billing_conf_path: "/etc/a2billing.conf"
 
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Installation de PHP 8.2 et des extensions (versions confirmées
-    #    identiques à la VM de référence : 8.2.32-1~deb12u1)
+    # 1. Installation de PHP 8.2, des extensions et de dos2unix
+    #    (versions PHP confirmées identiques à la VM de référence :
+    #    8.2.32-1~deb12u1)
     # ---------------------------------------------------------------
-    - name: Installer PHP 8.2 et les extensions requises
+    - name: Installer PHP 8.2, les extensions requises et dos2unix
       apt:
         name:
           - php8.2-cli
@@ -49,6 +65,7 @@
           - php8.2-intl
           - php8.2-opcache
           - php8.2-readline
+          - dos2unix
         state: present
         update_cache: yes
       register: apt_php_result
@@ -137,7 +154,7 @@
     - name: Copier /etc/a2billing.conf
       copy:
         src: files/a2billing.conf
-        dest: /etc/a2billing.conf
+        dest: "{{ a2billing_conf_path }}"
         owner: root
         group: asterisk
         mode: '0640'
@@ -156,8 +173,77 @@
         group: asterisk
         mode: '0755'
 
+    # =================================================================
+    # 9. CORRECTIF CRLF -> LF (ciblé, exécuté après toutes les copies
+    #    et extractions ci-dessus, avant les vérifications finales)
+    #
+    #    Approche par `find ... | xargs dos2unix` plutôt que `replace`
+    #    (regex fragile, ne gère pas le multi-fichiers proprement) ou
+    #    une conversion aveugle du dossier entier (corromprait les
+    #    images/locales binaires présentes dans common/).
+    #
+    #    Ciblage :
+    #      - agi-bin/ : a2billing.php uniquement (les .agi/.py sont
+    #        déjà traités par le rôle 05_agi_scripts.yml dédié)
+    #      - /etc/a2billing.conf : fichier de config unique
+    #      - common/  : *.php et *.inc, récursif (lib/ patché + tout
+    #        sous-dossier contenant du code, jamais les locales/images)
+    #      - vendor/  : *.php et *.inc, récursif (adodb, Smarty)
+    #
+    #    dos2unix est idempotent : si un fichier est déjà en LF, il
+    #    n'est pas modifié.
+    # =================================================================
+    - name: "CRLF->LF : convertir a2billing.php dans agi-bin/"
+      command: "dos2unix {{ asterisk_agi_bin_dir }}/a2billing.php"
+      register: dos2unix_a2billing_php
+      changed_when: "'converting' in dos2unix_a2billing_php.stderr"
+
+    - name: "CRLF->LF : convertir /etc/a2billing.conf"
+      command: "dos2unix {{ a2billing_conf_path }}"
+      register: dos2unix_a2billing_conf
+      changed_when: "'converting' in dos2unix_a2billing_conf.stderr"
+
+    - name: "CRLF->LF : convertir récursivement les .php et .inc dans common/"
+      shell: >
+        set -o pipefail;
+        find {{ asterisk_common_dir }} -type f \( -name '*.php' -o -name '*.inc' \) -print0
+        | xargs -0 --no-run-if-empty dos2unix
+      args:
+        executable: /bin/bash
+      register: dos2unix_common
+      changed_when: "'converting' in dos2unix_common.stderr"
+
+    - name: "CRLF->LF : convertir récursivement les .php et .inc dans vendor/"
+      shell: >
+        set -o pipefail;
+        find {{ asterisk_vendor_dir }} -type f \( -name '*.php' -o -name '*.inc' \) -print0
+        | xargs -0 --no-run-if-empty dos2unix
+      args:
+        executable: /bin/bash
+      register: dos2unix_vendor
+      changed_when: "'converting' in dos2unix_vendor.stderr"
+
     # ---------------------------------------------------------------
-    # 9. Vérifications finales
+    # 9bis. Vérification défensive : aucun \r ne doit subsister dans
+    #    les fichiers texte ciblés. On échoue explicitement plutôt
+    #    que de laisser un bug latent se manifester au runtime.
+    # ---------------------------------------------------------------
+    - name: "CRLF->LF : vérifier l'absence de \\r résiduel (agi-bin, conf, common, vendor)"
+      shell: >
+        set -o pipefail;
+        {
+          echo {{ asterisk_agi_bin_dir }}/a2billing.php;
+          echo {{ a2billing_conf_path }};
+          find {{ asterisk_common_dir }} {{ asterisk_vendor_dir }} -type f \( -name '*.php' -o -name '*.inc' \);
+        } | xargs -I{} grep -lU $'\r' {} || true
+      args:
+        executable: /bin/bash
+      register: crlf_residual_check
+      changed_when: false
+      failed_when: crlf_residual_check.stdout | trim | length > 0
+
+    # ---------------------------------------------------------------
+    # 10. Vérifications finales
     # ---------------------------------------------------------------
     - name: Vérifier la version de PHP installée
       command: php -v
@@ -192,7 +278,7 @@
 
     - name: Vérifier les permissions de /etc/a2billing.conf
       stat:
-        path: /etc/a2billing.conf
+        path: "{{ a2billing_conf_path }}"
       register: a2billing_conf_check
       failed_when: >
         a2billing_conf_check.stat.pw_name != 'root' or
@@ -211,6 +297,8 @@
           - "{{ php_version_check.stdout_lines[0] }}"
           - "--- Lien symbolique agi-bin/lib ---"
           - "Pointe vers : {{ symlink_check.stdout }} (attendu : {{ asterisk_common_dir }}/lib)"
+          - "--- Fins de ligne CRLF -> LF ---"
+          - "a2billing.php, a2billing.conf et tous les .php/.inc de common/ et vendor/ normalisés en LF, aucun \\r résiduel."
           - "--- Test syntaxique a2billing.php ---"
           - "{{ a2billing_syntax_check.stdout }}"
           - "--- Test syntaxique fichiers common/lib/ patchés ---"

@@ -137,19 +137,71 @@
       when: not asterisk_binary.stat.exists
 
     # -----------------------------------------------------------------
-    # CORRECTION (suite audit IAREVIEW, section 11) :
-    # On ne reconstruit plus le menuselect.makeopts à la main module par
-    # module (risque d'oubli, ex: app_confbridge manquant dans l'ancienne
-    # version de ce script). On copie directement le fichier réel, validé,
-    # extrait de la VM de référence où Asterisk 20 + PJSIP + ConfBridge +
-    # ODBC + CDR adaptive odbc tournent effectivement en production.
-    # Ce fichier doit être placé dans files/menuselect.makeopts du rôle
-    # avant exécution (récupéré via scp depuis la VM auditée).
+    # CORRECTION 2 (suite échec de compilation "test_performance" et
+    # autres modules sur VM fraîche) :
+    #
+    # La copie brute du menuselect.makeopts de la VM de référence
+    # (CORRECTION 1 ci-dessus) s'est révélée fragile : ce fichier encode
+    # le résultat d'une détection de dépendances PROPRE à la machine où
+    # il a été généré (MENUSELECT_DEPSFAILED liste les modules désactivés
+    # faute de bibliothèques présentes SUR CETTE MACHINE À CE MOMENT-LÀ).
+    # Sur une VM fraîche avec un jeu de paquets légèrement différent, des
+    # modules que le fichier croit "activables" (car absents de
+    # DEPSFAILED sur la VM d'origine) ne le sont pas forcément ici, et
+    # `make` échoue (ex: test_performance).
+    #
+    # Retour à l'approche hybride : on régénère menuselect.makeopts
+    # LOCALEMENT (détection de dépendances propre à CETTE machine), puis
+    # on force explicitement l'activation des modules dont on a besoin -
+    # comme avant l'audit IAREVIEW, mais en n'oubliant plus app_confbridge
+    # cette fois (c'était le seul vrai défaut de l'approche originale).
     # -----------------------------------------------------------------
-    - name: Copier le menuselect.makeopts validé (état réel audité de la VM de référence)
-      copy:
-        src: files/menuselect.makeopts
-        dest: "{{ asterisk_build_dir }}/menuselect.makeopts"
+    - name: Générer menuselect.makeopts (détection des dépendances propre à cette machine)
+      command: make menuselect.makeopts
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Forcer l'activation de res_odbc dans menuselect
+      command: "menuselect/menuselect --enable res_odbc menuselect.makeopts"
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Forcer l'activation de res_config_odbc dans menuselect
+      command: "menuselect/menuselect --enable res_config_odbc menuselect.makeopts"
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Forcer l'activation de cdr_adaptive_odbc dans menuselect
+      command: "menuselect/menuselect --enable cdr_adaptive_odbc menuselect.makeopts"
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Forcer l'activation de res_srtp dans menuselect
+      command: "menuselect/menuselect --enable res_srtp menuselect.makeopts"
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Forcer l'activation de app_mixmonitor (enregistrement) dans menuselect
+      command: "menuselect/menuselect --enable app_mixmonitor menuselect.makeopts"
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Forcer l'activation de app_voicemail (messagerie) dans menuselect
+      command: "menuselect/menuselect --enable app_voicemail menuselect.makeopts"
+      args:
+        chdir: "{{ asterisk_build_dir }}"
+      when: not asterisk_binary.stat.exists
+
+    - name: Forcer l'activation de app_confbridge (conférences) dans menuselect
+      command: "menuselect/menuselect --enable app_confbridge menuselect.makeopts"
+      args:
+        chdir: "{{ asterisk_build_dir }}"
       when: not asterisk_binary.stat.exists
 
     - name: Compiler Asterisk (make) - peut prendre 10 à 30 minutes

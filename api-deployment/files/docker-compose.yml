@@ -1,6 +1,6 @@
 services:
   voip-backend:
-    image: ghcr.io/charliewalker-art/api-voip:v0.0.24
+    image: ghcr.io/charliewalker-art/api-voip:v0.0.26
     container_name: voip-backend
     env_file:
       - .env
@@ -11,7 +11,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   voip-frontend:
-    image: ghcr.io/charliewalker-art/voip-front-end:v0.0.8
+    image: ghcr.io/charliewalker-art/voip-front-end:v0.0.12
     container_name: voip-frontend
     restart: unless-stopped
 

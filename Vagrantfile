@@ -5,11 +5,11 @@ Vagrant.configure("2") do |config|
 
   # Réseau privé : IP dédiée à la VM, plus stable que le bridge Wi-Fi
   # (accessible depuis ta machine hôte, pas depuis tout le LAN)
-  config.vm.network "private_network", type: "dhcp"
+  #config.vm.network "private_network", type: "dhcp"
 
   config.vm.provider "virtualbox" do |vb|
-    vb.name   = "Voip2"
-    vb.memory = "2000"
+    vb.name   = "Voip3"
+    vb.memory = "3000"
     vb.cpus   = 1
   end
 
@@ -19,9 +19,11 @@ Vagrant.configure("2") do |config|
     apt-get update -qq
     apt-get install -y software-properties-common curl git python3-pip htop
     apt-get install -y ansible python3-debian
+    ansible-galaxy collection install community.docker
+
   SHELL
 
-
+ 
   config.vm.provision "ansible_local" do |ansible|
    ansible.playbook = "asterisk/00_asterisk_install.yml"
  end
@@ -81,12 +83,13 @@ end
 
 
 config.vm.provision "ansible_local" do |ansible|
-  ansible.playbook = "api-deployment/api_deployment.yml"
+  ansible.playbook = "timezone/timezone_config.yml"
 end
 
+ 
 
 config.vm.provision "ansible_local" do |ansible|
-  ansible.playbook = "timezone/timezone_config.yml"
+  ansible.playbook = "api-deployment/api_deployment.yml"
 end
 
 

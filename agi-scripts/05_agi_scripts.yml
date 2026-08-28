@@ -28,6 +28,16 @@
 # documenté (anciens points d'entrée AGI remplacés par le système IVR
 # dynamique _9XX, cf. audit IAREVIEW section 11) mais sont copiés tels
 # quels par précaution, sur décision explicite - pas de suppression.
+#
+# CORRECTIF CRLF/LF : la machine de contrôle Ansible est sous Windows.
+# Le module `copy` transfère les fichiers octet pour octet, donc si un
+# fichier source contient des CRLF, ils arrivent tels quels sur la VM
+# Debian et cassent le shebang (#!/usr/bin/env python3\r) au moment où
+# Asterisk exécute le script AGI. Deux lignes de défense sont mises en
+# place : (1) `.gitattributes` au niveau du dépôt pour normaliser en LF
+# dès le checkout Git, et (2) une passe `dos2unix` post-copie sur la VM,
+# qui est idempotente et sert de filet de sécurité même si le dépôt
+# n'a pas encore été corrigé ou si un contributeur committe en CRLF.
 # =====================================================================
 - name: Copie des scripts AGI/Python du projet VoIP
   hosts: all
@@ -54,15 +64,15 @@
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Dépendance système (Python + psycopg2) - normalement déjà
-    #    présente depuis le rôle 01, mais on s'assure explicitement
-    #    ici que ce rôle est autonome et rejouable indépendamment.
+    # 1. Dépendances système : Python + psycopg2 (comme avant) et
+    #    dos2unix, nécessaire pour le correctif CRLF ci-dessous.
     # ---------------------------------------------------------------
-    - name: S'assurer que python3 et python3-psycopg2 sont installés
+    - name: S'assurer que python3, python3-psycopg2 et dos2unix sont installés
       apt:
         name:
           - python3
           - python3-psycopg2
+          - dos2unix
         state: present
       register: apt_python_result
       retries: 5
@@ -98,7 +108,28 @@
       register: agi_module_copy
 
     # ---------------------------------------------------------------
-    # 4. Vérifications finales
+    # 4. Correctif défensif CRLF -> LF
+    #
+    #    On utilise le module `command` avec dos2unix plutôt que
+    #    `replace` (regex fragile sur du binaire/texte mixte) ou
+    #    `lineinfile` (inadapté ici). dos2unix est idempotent par
+    #    nature : s'il ne trouve aucun \r\n, il ne modifie rien et
+    #    ne renvoie pas d'erreur, donc `changed_when` se base sur sa
+    #    propre sortie plutôt que de forcer un "changed" à chaque run.
+    #
+    #    On applique dos2unix aux 12 fichiers (executables + modules)
+    #    puisque les modules importés peuvent eux aussi contenir des
+    #    CRLF qui perturberaient python3 -m py_compile ou l'import.
+    # ---------------------------------------------------------------
+    - name: Convertir les fins de ligne CRLF en LF sur tous les scripts AGI/Python (défensif)
+      command: "dos2unix {{ agi_bin_dir }}/{{ item }}"
+      loop: "{{ agi_executable_scripts + agi_module_scripts }}"
+      register: dos2unix_result
+      changed_when: "'converted' in dos2unix_result.stdout or 'dos2unix: converting' in dos2unix_result.stderr"
+      failed_when: dos2unix_result.rc != 0
+
+    # ---------------------------------------------------------------
+    # 5. Vérifications finales
     # ---------------------------------------------------------------
     - name: Vérifier la présence et les permissions de tous les scripts copiés
       stat:
@@ -119,19 +150,20 @@
         index_var: idx
         label: "{{ item }}"
 
+    - name: Vérifier qu'aucun fichier ne contient plus de CRLF après conversion
+      command: "grep -lU $'\\r' {{ agi_bin_dir }}/{{ item }}"
+      loop: "{{ agi_executable_scripts + agi_module_scripts }}"
+      register: crlf_residual_check
+      changed_when: false
+      failed_when: crlf_residual_check.rc == 0
+      args:
+        executable: /bin/bash
+
     - name: Vérifier que psycopg2 est bien importable par Python
       command: python3 -c "import psycopg2; print(psycopg2.__version__)"
       register: psycopg2_check
       changed_when: false
 
-    # -----------------------------------------------------------------
-    # CORRECTIF : les 7 fichiers .agi sont AUSSI du Python (confirmé par
-    # "head -1 *.agi" sur la VM de référence -> shebang #!/usr/bin/env
-    # python3 partout). Le test syntaxique doit donc couvrir les 12
-    # fichiers, pas seulement les 4 .py - sinon 6 fichiers (hors
-    # recharge-agi.py déjà couvert) échappaient totalement à la
-    # vérification.
-    # -----------------------------------------------------------------
     - name: Test syntaxique de TOUS les scripts Python (les 8 .agi + les 3 modules .py + recharge-agi.py)
       command: python3 -m py_compile {{ agi_bin_dir }}/{{ item }}
       loop: "{{ agi_executable_scripts + agi_module_scripts }}"
@@ -143,6 +175,7 @@
         msg:
           - "--- Fichiers copiés et vérifiés (existence + propriétaire + permissions) ---"
           - "{{ agi_files_check.results | map(attribute='stat.path') | list }}"
+          - "--- Fins de ligne CRLF -> LF appliquées via dos2unix, aucun \\r résiduel ---"
           - "--- Version psycopg2 disponible ---"
           - "{{ psycopg2_check.stdout }}"
           - "--- Test syntaxique Python sur les 12 fichiers (les .agi sont aussi du Python, shebang confirmé) ---"
