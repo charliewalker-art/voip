@@ -1,33 +1,37 @@
 ---
 
 # =====================================================================
-# Déploiement du dialplan final (extensions.conf)
+# Déploiement du dialplan final Asterisk (extensions.conf + internal.conf)
+#
+# MISE À JOUR IMPORTANTE : la structure du dialplan a évolué depuis
+# l'écriture initiale de ce rôle. extensions.conf ne contient plus le
+# dialplan lui-même - juste un "#include internal.conf". Le vrai
+# contenu (contexte "internal", pas "from-internal"/"ivr-entry") vit
+# maintenant dans internal.conf, avec les menus IVR 900/960/961/970
+# déclarés individuellement (plus de pattern générique _9XX - conséquence
+# du système de contextes dynamiques mis en place entre-temps).
 #
 # Ce fichier est la pièce centrale qui RELIE tous les rôles précédents :
-#   - [from-internal] _1XXX : appels internes, facturés via A2Billing
+#   - [internal] _1XXX : appels internes, facturés via A2Billing
 #     (AGI a2billing.php, rôle 06), avec fallback messagerie vocale
 #     (rôle 02, voicemail.conf) et limite de durée configurable
 #     (get-setting.agi + reset-stale-inuse.agi, rôle 05)
-#   - [from-internal] _3XXX : conférences ConfBridge (conference-entry.agi,
+#   - [internal] _3XXX : conférences ConfBridge (conference-entry.agi,
 #     rôle 05 + confbridge.conf, rôle 07)
-#   - [ivr-entry] _9XX : IVR dynamique (ivr-dynamic.agi, rôle 05, pilotée
-#     par les données ivr_menus/ivr_options/ivr_services, rôle 03)
-#
-# Contenu confirmé IDENTIQUE à l'audit initial (IAREVIEW section 1) -
-# aucune dérive depuis, revérifié avant copie (taille et permissions
-# identiques : 34207 octets, asterisk:asterisk, 0644).
+#   - [internal] 900/960/961/970 : IVR dynamique (ivr-dynamic.agi, rôle 05,
+#     pilotée par les données ivr_menus/ivr_options/ivr_services, rôle 03)
 #
 # Restart/reload : d'après la carte validée en audit (section 6),
 # "dialplan reload" suffit - pas de restart complet nécessaire.
 # =====================================================================
-- name: Déploiement du dialplan final Asterisk (extensions.conf)
+- name: Déploiement du dialplan final Asterisk (extensions.conf + internal.conf)
   hosts: all
   become: true
 
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Copie de extensions.conf
+    # 1. Copie de extensions.conf (fichier minimal, #include uniquement)
     # ---------------------------------------------------------------
     - name: Copier /etc/asterisk/extensions.conf
       copy:
@@ -40,7 +44,20 @@
       register: extensions_conf_copy
 
     # ---------------------------------------------------------------
-    # 2. Reload du dialplan (pas de restart complet nécessaire)
+    # 2. Copie de internal.conf (le vrai contenu du dialplan)
+    # ---------------------------------------------------------------
+    - name: Copier /etc/asterisk/internal.conf
+      copy:
+        src: files/internal.conf
+        dest: /etc/asterisk/internal.conf
+        owner: asterisk
+        group: asterisk
+        mode: '0644'
+        backup: yes
+      register: internal_conf_copy
+
+    # ---------------------------------------------------------------
+    # 3. Reload du dialplan (pas de restart complet nécessaire)
     # ---------------------------------------------------------------
     - name: Recharger le dialplan
       command: /usr/sbin/asterisk -rx "dialplan reload"
@@ -52,16 +69,11 @@
         seconds: 2
 
     # ---------------------------------------------------------------
-    # 3. Vérifications finales
+    # 4. Vérifications finales
     # ---------------------------------------------------------------
-    - name: Vérifier le contexte from-internal
-      command: /usr/sbin/asterisk -rx "dialplan show from-internal"
-      register: from_internal_check
-      changed_when: false
-
-    - name: Vérifier le contexte ivr-entry
-      command: /usr/sbin/asterisk -rx "dialplan show ivr-entry"
-      register: ivr_entry_check
+    - name: Vérifier le contexte internal (contient tout : _1XXX, _3XXX, 900/960/961/970)
+      command: /usr/sbin/asterisk -rx "dialplan show internal"
+      register: internal_context_check
       changed_when: false
 
     - name: Compter le nombre total de contextes chargés
@@ -72,13 +84,11 @@
     - name: Afficher le résumé du déploiement du dialplan
       debug:
         msg:
-          - "--- Contexte from-internal (_1XXX facturé A2Billing, _3XXX ConfBridge) ---"
-          - "{{ from_internal_check.stdout }}"
-          - "--- Contexte ivr-entry (_9XX IVR dynamique) ---"
-          - "{{ ivr_entry_check.stdout }}"
+          - "--- Contexte internal (_1XXX facturé A2Billing, _3XXX ConfBridge, 900/960/961/970 IVR) ---"
+          - "{{ internal_context_check.stdout }}"
           - "Dialplan rechargé avec succès. Le système VoIP est maintenant entièrement connecté :"
           - "  - Appels internes 1001/1002/1003 -> facturation A2Billing en temps réel"
           - "  - Fallback automatique vers messagerie vocale si occupé/injoignable"
           - "  - Conférences 3000 (libre) / 3001 (PIN 1234, facturée) via _3XXX"
-          - "  - Menus IVR dynamiques 900/960/961/970 via _9XX"
+          - "  - Menus IVR 900/960/961/970 (déclarés individuellement, plus de pattern _9XX générique)"
           - "Prochaine étape : rôle 09_restart_and_verify.yml (restart complet + tests bout en bout : appel réel, IVR, conférence)."

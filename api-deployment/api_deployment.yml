@@ -1,0 +1,129 @@
+---
+
+# =====================================================================
+# Déploiement de l'API VoIP + frontend via Docker Compose
+#
+# Prérequis : Docker installé séparément (installation-docker/install_docker.yml,
+# déjà exécuté avant ce rôle).
+#
+# Ce rôle ne construit AUCUNE image - il copie uniquement les fichiers
+# de configuration (docker-compose.yml, .env, nginx-proxy.conf) et tire
+# les images publiques déjà publiées sur GitHub Container Registry
+# (ghcr.io/charliewalker-art/api-voip, ghcr.io/charliewalker-art/voip-front-end).
+#
+# Dossier de déploiement : /opt/voip-api/
+#
+# SÉCURITÉ : le fichier .env contient des secrets réels en clair
+# (mots de passe des 3 bases, JWT_SECRET, ASTERISK_SSH_PASSWORD).
+# Copié tel quel pour l'instant (cohérent avec le reste du projet),
+# à vaulter avant tout déploiement en dehors d'un contexte de
+# développement/démo. Ne JAMAIS committer ce fichier dans un dépôt Git.
+# =====================================================================
+- name: Déploiement de l'API VoIP et du frontend (Docker Compose)
+  hosts: all
+  become: true
+
+  vars:
+    deployment_dir: "/opt/voip-api"
+
+  tasks:
+
+    # ---------------------------------------------------------------
+    # 1. Préparation du dossier de déploiement
+    # ---------------------------------------------------------------
+    - name: Créer le dossier de déploiement /opt/voip-api
+      file:
+        path: "{{ deployment_dir }}"
+        state: directory
+        mode: '0755'
+
+    # ---------------------------------------------------------------
+    # 2. Copie des fichiers de configuration
+    # ---------------------------------------------------------------
+    - name: Copier docker-compose.yml
+      copy:
+        src: files/docker-compose.yml
+        dest: "{{ deployment_dir }}/docker-compose.yml"
+        mode: '0644'
+        backup: yes
+      register: compose_file_copy
+
+    - name: Copier .env (secrets - fichier restreint)
+      copy:
+        src: files/.env
+        dest: "{{ deployment_dir }}/.env"
+        mode: '0600'
+        backup: yes
+      register: env_file_copy
+
+    - name: Copier nginx-proxy.conf
+      copy:
+        src: files/nginx-proxy.conf
+        dest: "{{ deployment_dir }}/nginx-proxy.conf"
+        mode: '0644'
+        backup: yes
+      register: nginx_conf_copy
+
+    # ---------------------------------------------------------------
+    # 3. Créer le dossier de stockage Ansible monté dans le container
+    #    (référencé dans docker-compose.yml : /opt/ansible_storage)
+    # ---------------------------------------------------------------
+    - name: Créer le dossier /opt/ansible_storage (monté dans voip-backend)
+      file:
+        path: /opt/ansible_storage
+        state: directory
+        mode: '0755'
+
+    # ---------------------------------------------------------------
+    # 4. Tirer les dernières images depuis GHCR
+    # ---------------------------------------------------------------
+    - name: Tirer les images Docker définies dans docker-compose.yml
+      community.docker.docker_compose_v2_pull:
+        project_src: "{{ deployment_dir }}"
+      register: images_pull
+      ignore_errors: true
+
+    - name: (Repli) Tirer les images via docker compose pull en ligne de commande
+      command: docker compose pull
+      args:
+        chdir: "{{ deployment_dir }}"
+      when: images_pull is failed
+      register: images_pull_fallback
+
+    # ---------------------------------------------------------------
+    # 5. Démarrer/mettre à jour les containers
+    #    NOTE : on ne PAS attendre/vérifier que les containers soient
+    #    réellement démarrés et fonctionnels - l'IP/configuration réseau
+    #    (.env) peut varier selon l'environnement de déploiement, donc un
+    #    healthcheck bloquant ici donnerait de faux échecs. Le script se
+    #    contente de lancer "docker compose up -d" (qui attend nativement
+    #    la fin du téléchargement des images, déjà fait à l'étape 4) et
+    #    remonte l'état brut sans retry/polling.
+    # ---------------------------------------------------------------
+    - name: Démarrer les containers (docker compose up -d)
+      command: docker compose up -d
+      args:
+        chdir: "{{ deployment_dir }}"
+      register: compose_up
+
+    # ---------------------------------------------------------------
+    # 6. État final (informatif uniquement, non bloquant)
+    # ---------------------------------------------------------------
+    - name: Vérifier l'état des containers (informatif, non bloquant)
+      command: docker compose ps
+      args:
+        chdir: "{{ deployment_dir }}"
+      register: compose_ps
+      changed_when: false
+      failed_when: false
+
+    - name: Afficher le résumé du déploiement
+      debug:
+        msg:
+          - "--- Sortie de 'docker compose up -d' ---"
+          - "{{ compose_up.stdout_lines }}"
+          - "--- État des containers au moment de la vérification (peut encore être en cours de démarrage) ---"
+          - "{{ compose_ps.stdout_lines | default(['Non disponible']) }}"
+          - "Déploiement lancé. Les containers démarrent en arrière-plan (pas d'attente de disponibilité effectuée ici, l'IP/config réseau pouvant varier selon l'environnement)."
+          - "Vérifier manuellement si besoin avec : docker compose ps / docker compose logs -f voip-backend (depuis {{ deployment_dir }})."
+          - "RAPPEL SÉCURITÉ : le fichier {{ deployment_dir }}/.env contient des secrets en clair (permissions 0600 appliquées) - ne jamais le committer dans un dépôt Git."

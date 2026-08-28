@@ -2,10 +2,10 @@
 -- PostgreSQL database dump
 --
 
-\restrict YeonoR0Z126dzeuqArGJZOTqlzxxa1Hz7Ots0ipFfq1HQtVlMWTlPcJ429Gy8bt
+\restrict bWdvzgv64AqpYAOZQ9WBPghqxSCHnRlmZqFjjrBesGnUAW3ioZDO4ma7MbryWHO
 
--- Dumped from database version 15.18 (Debian 15.18-0+deb12u1)
--- Dumped by pg_dump version 15.18 (Debian 15.18-0+deb12u1)
+-- Dumped from database version 15.19 (Debian 15.19-0+deb12u1)
+-- Dumped by pg_dump version 15.19 (Debian 15.19-0+deb12u1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -22,7 +22,7 @@ SET row_security = off;
 -- Data for Name: cc_tariffgroup; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-INSERT INTO public.cc_tariffgroup (id, iduser, idtariffplan, tariffgroupname, lcrtype, creationdate, removeinterprefix, id_cc_package_offer) VALUES (1, 0, 1, 'Groupe Interne', 0, '2026-08-05 11:39:08.188285', 0, 0);
+INSERT INTO public.cc_tariffgroup (id, iduser, idtariffplan, tariffgroupname, lcrtype, creationdate, removeinterprefix, id_cc_package_offer) VALUES (1, 0, 1, 'Groupe Interne', 0, '2026-08-22 19:03:55.303344', 0, 0);
 
 
 --
@@ -104,6 +104,9 @@ INSERT INTO public.cc_tariffgroup (id, iduser, idtariffplan, tariffgroupname, lc
 INSERT INTO public.cc_callerid (id, cid, id_cc_card, activated) VALUES (1, '1001', 1, true);
 INSERT INTO public.cc_callerid (id, cid, id_cc_card, activated) VALUES (2, '1002', 2, true);
 INSERT INTO public.cc_callerid (id, cid, id_cc_card, activated) VALUES (3, '1003', 3, true);
+INSERT INTO public.cc_callerid (id, cid, id_cc_card, activated) VALUES (4, '1004', 4, true);
+INSERT INTO public.cc_callerid (id, cid, id_cc_card, activated) VALUES (5, '1005', 5, true);
+INSERT INTO public.cc_callerid (id, cid, id_cc_card, activated) VALUES (6, '1006', 6, true);
 
 
 --
@@ -140,9 +143,12 @@ INSERT INTO public.cc_callerid (id, cid, id_cc_card, activated) VALUES (3, '1003
 -- Data for Name: cc_card; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (1, '2026-08-05 11:36:47.880185', '2026-08-07 10:37:57.534786', NULL, 0, 0, '1001', '1001', NULL, 1454.0000, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 'MGA', '2026-08-12', 21, 0, 0, 0, 0, 0, 'fr', '1002', 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
-INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (2, '2026-08-05 11:36:47.880185', '2026-08-07 10:40:14.162155', NULL, 0, 0, '1002', '1002', NULL, 890.0000, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 1, 0, 'MGA', '2026-08-10', 8, 0, 0, 0, 0, 0, 'fr', '1001', 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
-INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (3, '2026-08-15 19:49:30.650374', NULL, NULL, 0, 0, '1003', '1003', NULL, 5000.0000, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 'MGA', '2026-08-15', 0, 0, 0, 0, 0, 0, 'fr', NULL, 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
+INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (6, '2026-08-25 14:28:54.909044', '2026-08-25 13:45:30.422623', NULL, 0, 0, '1006', '1006', NULL, 6086.0000, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 'MGA', '2026-08-25', 1, 0, 0, 0, 0, 0, 'fr', '1002', 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
+INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (3, '2026-08-24 03:55:46.313501', NULL, NULL, 0, 0, '1003', '1003', NULL, 482.5000, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 'MGA', '2026-08-24', 0, 0, 0, 0, 0, 0, 'fr', NULL, 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
+INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (5, '2026-08-25 10:52:44.926999', NULL, NULL, 0, 0, '1005', '1005', NULL, 94.5000, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 'MGA', '2026-08-25', 0, 0, 0, 0, 0, 0, 'fr', NULL, 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
+INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (1, '2026-08-22 19:12:01.262031', '2026-08-23 07:12:55.885389', NULL, 0, 0, '1001', '1001', NULL, 7979.2500, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 'MGA', '2026-08-27', 11, 0, 0, 0, 0, 0, 'fr', '1002', 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
+INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (4, '2026-08-25 07:30:23.788544', '2026-08-25 09:36:42.385402', NULL, 0, 0, '1004', '1004', NULL, 461.7500, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 'MGA', '2026-08-25', 2, 0, 0, 0, 0, 0, 'fr', '1002', 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
+INSERT INTO public.cc_card (id, creationdate, firstusedate, expirationdate, enableexpire, expiredays, username, useralias, uipass, credit, tariff, id_didgroup, activated, lastname, firstname, address, city, state, country, zipcode, phone, email, fax, inuse, simultaccess, currency, lastuse, nbused, typepaid, creditlimit, voipcall, sip_buddy, iax_buddy, language, redial, runservice, nbservice, id_campaign, num_trials_done, vat, servicelastrun, initialbalance, invoiceday, autorefill, loginkey, mac_addr, id_timezone, status, tag, voicemail_permitted, voicemail_activated, last_notification, email_notification, notify_email, credit_notification, id_group, company_name, company_website, vat_rn, traffic, traffic_target, discount, restriction, id_seria, serial, block, lock_pin, lock_date) VALUES (2, '2026-08-22 19:12:42.991153', '2026-08-25 07:44:05.912227', NULL, 0, 0, '1002', '1002', NULL, 946.2500, 1, 0, true, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, 0, 'MGA', '2026-08-27', 10, 0, 0, 0, 0, 0, 'fr', '1003', 0, 0, 0, 0, 0.000, NULL, 0.0000, 1, 0, NULL, '00-00-00-00-00-00', 0, 1, NULL, 0, 0, NULL, NULL, 0, -1, 1, NULL, NULL, NULL, 0, NULL, 0.00, 0, NULL, NULL, 0, NULL, NULL);
 
 
 --
@@ -353,7 +359,6 @@ INSERT INTO public.cc_config (id, config_title, config_key, config_value, config
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (188, 'SIP/IAX Dial Command Params', 'dialcommand_param_sipiax_friend', '|60|HiL(3600000:61000:30000)', 'by default (3600000  =  1HOUR MAX CALL).', 0, NULL, 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (189, 'Outbound Call', 'switchdialcommand', '0', 'Define the order to make the outbound call<br>YES -> SIP/dialedphonenumber@gateway_ip - NO  SIP/gateway_ip/dialedphonenumber<br>Both should work exactly the same but i experimented one case when gateway was supporting dialedphonenumber@gateway_ip, So in case of trouble, try it out.', 1, 'yes,no', 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (170, 'CLID Enable', 'cid_enable', '1', 'enable the callerid authentication if this option is active the CC system will check the CID of caller  .', 1, 'yes,no', 'agi-conf1');
-INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (159, 'Use DNID', 'use_dnid', '1', 'if YES it will use the DNID and try to dial out, without asking for the phonenumber to call.', 1, 'yes,no', 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (161, 'Try Count', 'number_try', '1', 'number of times the user can dial different number.', 0, NULL, 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (163, 'Say Balance After Auth', 'say_balance_after_auth', '0', 'Play the balance to the user after the authentication (values : yes - no).', 1, 'yes,no', 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (166, 'Say Duration', 'say_timetocall', '0', 'Play the amount of time that the user can call (values : yes - no).', 1, 'yes,no', 'agi-conf1');
@@ -388,6 +393,7 @@ INSERT INTO public.cc_config (id, config_title, config_key, config_value, config
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (215, 'Extra charge DIDs', 'extracharge_did', '1800,1900', 'Add extra per-minute charges to this comma-separated list of DNIDs; needs "extracharge_fee" and "extracharge_buyfee"', 0, NULL, 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (218, 'Card Serial Pad Length', 'card_serial_length', '7', 'Value of zero padding for serial. If this value set to 3 serial wil looks like 001', 0, NULL, 'webui');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (219, 'Dial Balance reservation', 'dial_balance_reservation', '0.25', 'Credit to reserve from the balance when a call is made. This will prevent negative balance on huge peak.', 0, NULL, 'agi-conf1');
+INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (159, 'Use DNID', 'use_dnid', '1', 'if YES it will use the DNID and try to dial out, without asking for the phonenumber to call.', 1, 'yes,no', 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (220, 'Menu Language Order', 'conf_order_menulang', 'en:fr:es', 'Enter the list of languages authorized for the menu.Use the code language separate by a colon charactere e.g: en:es:fr', 0, NULL, 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (221, 'Disable annoucement the second of the times that the card can call', 'disable_announcement_seconds', '0', 'Desactived the annoucement of the seconds when there are more of one minutes (values : yes - no)', 1, 'yes,no', 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (222, 'Charge for the paypal extra fees', 'charge_paypal_fee', '0', 'Actived, if you want assum the fee of paypal and don''t apply it on the customer (values : yes - no)', 1, 'yes,no', 'epayment_method');
@@ -474,7 +480,7 @@ INSERT INTO public.cc_config (id, config_title, config_key, config_value, config
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (300, 'IVR Speed Dial', 'ivr_enable_ivr_speeddial', '0', 'Enable the IVR which allow the users add speed dial.', 1, 'yes,no', 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (302, 'Debug Shell Mode', 'debugshell', '0', NULL, 1, NULL, 'agi-conf1');
 INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (274, 'Asterisk Version Global', 'asterisk_version', '1_8', 'Asterisk Version Information, 1_1, 1_2, 1_4, 1_6. By Default the version is 1_4.', 0, NULL, 'global');
-INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (187, 'Dial Command Params', 'dialcommand_param', '|60|HRirL(%timeout%)', 'More information about the Dial : http://voip-info.org/wiki-Asterisk+cmd+dial<br>30 :  The timeout parameter is optional. If not specifed, the Dial command will wait indefinitely, exiting only when the originating channel hangs up, or all the dialed channels return a busy or error condition. Otherwise it specifies a maximum time, in seconds, that the Dial command is to wait for a channel to answer.<br>H: Allow the caller to hang up by dialing * <br>r: Generate a ringing tone for the calling party<br>R: Indicate ringing to the calling party when the called party indicates ringing, pass no audio until answered.<br>g: When the called party hangs up, exit to execute more commands in the current context. (new in 1.4)<br>i: Asterisk will ignore any forwarding (302 Redirect) requests received. Essential for DID usage to prevent fraud. (new in 1.4)<br>m: Provide Music on Hold to the calling party until the called channel answers.<br>L(x[:y][:z]): Limit the call to ''x'' ms, warning when ''y'' ms are left, repeated every ''z'' ms)<br>%timeout% tag is replaced by the calculated timeout according the credit & destination rate!.', 0, NULL, 'agi-conf1');
+INSERT INTO public.cc_config (id, config_title, config_key, config_value, config_description, config_valuetype, config_listvalues, config_group_title) VALUES (187, 'Dial Command Params', 'dialcommand_param', '|20|HRirL(%timeout%)', 'More information about the Dial : http://voip-info.org/wiki-Asterisk+cmd+dial<br>30 :  The timeout parameter is optional. If not specifed, the Dial command will wait indefinitely, exiting only when the originating channel hangs up, or all the dialed channels return a busy or error condition. Otherwise it specifies a maximum time, in seconds, that the Dial command is to wait for a channel to answer.<br>H: Allow the caller to hang up by dialing * <br>r: Generate a ringing tone for the calling party<br>R: Indicate ringing to the calling party when the called party indicates ringing, pass no audio until answered.<br>g: When the called party hangs up, exit to execute more commands in the current context. (new in 1.4)<br>i: Asterisk will ignore any forwarding (302 Redirect) requests received. Essential for DID usage to prevent fraud. (new in 1.4)<br>m: Provide Music on Hold to the calling party until the called channel answers.<br>L(x[:y][:z]): Limit the call to ''x'' ms, warning when ''y'' ms are left, repeated every ''z'' ms)<br>%timeout% tag is replaced by the calculated timeout according the credit & destination rate!.', 0, NULL, 'agi-conf1');
 
 
 --
@@ -1181,10 +1187,17 @@ INSERT INTO public.cc_iso639 (code, name, lname, charset) VALUES ('zu', 'Zulu   
 -- Data for Name: cc_logrefill; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (1, '2026-08-08 22:46:53', 500.00000, 1, 'Recharge par voucher (960) - code: 1001', 1, 0, NULL);
-INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (2, '2026-08-09 07:33:57', 200.00000, 1, 'Recharge par voucher (960) - code: 1001', 1, 0, NULL);
-INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (3, '2026-08-09 07:48:39', 300.00000, 2, 'Recharge par voucher (960) - code: 1002', 1, 0, NULL);
-INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (4, '2026-08-10 13:35:10', 100.00000, 2, 'Recharge par voucher (960) - code: 1002', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (1, '2026-08-23 07:20:54', 500.00000, 1, 'Recharge par voucher (960) - code: 1001', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (2, '2026-08-23 08:08:29', 500.00000, 2, 'Recharge par voucher (960) - code: 1002', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (3, '2026-08-25 09:03:39', 500.00000, 2, 'Recharge par voucher (960) - code: 1002', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (4, '2026-08-25 09:34:55', 500.00000, 4, 'Recharge par voucher (960) - code: 1004', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (5, '2026-08-25 14:33:57', 1000.00000, 6, 'Recharge par voucher (960) - code: 1006', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (6, '2026-08-25 14:34:54', 5000.00000, 6, 'Recharge par voucher (960) - code: 1006', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (7, '2026-08-26 13:25:25', 1000.00000, 1, 'Recharge par voucher (960) - code: 1001', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (8, '2026-08-26 16:07:49', 500.00000, 1, 'Recharge par voucher (960) - code: 1001', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (9, '2026-08-27 12:25:07', 1000.00000, 1, 'Recharge par voucher (960) - code: 1001', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (10, '2026-08-27 14:04:42', 5000.00000, 1, 'Recharge par voucher (960) - code: 1001', 1, 0, NULL);
+INSERT INTO public.cc_logrefill (id, date, credit, card_id, description, refill_type, added_invoice, agent_id) VALUES (11, '2026-08-27 15:33:57', 500.00000, 2, 'Recharge par voucher (960) - code: 1002', 1, 0, NULL);
 
 
 --
@@ -1326,7 +1339,7 @@ INSERT INTO public.cc_prefix (prefix, destination) VALUES (1, 'Interne');
 -- Data for Name: cc_ratecard; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-INSERT INTO public.cc_ratecard (id, idtariffplan, dialprefix, destination, buyrate, buyrateinitblock, buyrateincrement, rateinitial, initblock, billingblock, connectcharge, disconnectcharge, stepchargea, chargea, timechargea, billingblocka, stepchargeb, chargeb, timechargeb, billingblockb, stepchargec, chargec, timechargec, billingblockc, startdate, stopdate, starttime, endtime, id_trunk, musiconhold, id_outbound_cidgroup, rounding_calltime, rounding_threshold, additional_block_charge, additional_block_charge_time, tag, is_merged, additional_grace, minimal_cost, announce_time_correction, disconnectcharge_after) VALUES (1, 1, '_.', 1, 0.00000, 0, 0, 1.00000, 1, 1, 0.00000, 0.00000, 0.00000, 60.00000, 999999, 1, 0.00000, 0.00000, 0, 0, 0.00000, 0.00000, 0, 0, '2026-08-05 11:41:23', NULL, 0, 10079, 1, NULL, -1, 0, 0, 0.00000, 0, NULL, 0, 0, 0.00000, 1.000, 0);
+INSERT INTO public.cc_ratecard (id, idtariffplan, dialprefix, destination, buyrate, buyrateinitblock, buyrateincrement, rateinitial, initblock, billingblock, connectcharge, disconnectcharge, stepchargea, chargea, timechargea, billingblocka, stepchargeb, chargeb, timechargeb, billingblockb, stepchargec, chargec, timechargec, billingblockc, startdate, stopdate, starttime, endtime, id_trunk, musiconhold, id_outbound_cidgroup, rounding_calltime, rounding_threshold, additional_block_charge, additional_block_charge_time, tag, is_merged, additional_grace, minimal_cost, announce_time_correction, disconnectcharge_after) VALUES (1, 1, '_.', 1, 0.00000, 0, 0, 0.00000, 0, 0, 0.00000, 0.00000, 0.00000, 60.00000, 999999, 1, 0.00000, 0.00000, 0, 0, 0.00000, 0.00000, 0, 0, '2026-08-22 19:06:24', NULL, 0, 10079, 1, NULL, -1, 0, 0, 0.00000, 0, NULL, 0, 0, 0.00000, 1.000, 0);
 
 
 --
@@ -1440,7 +1453,7 @@ INSERT INTO public.cc_tariffgroup_plan (idtariffgroup, idtariffplan) VALUES (1, 
 -- Data for Name: cc_tariffplan; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-INSERT INTO public.cc_tariffplan (id, iduser, tariffname, creationdate, startingdate, expirationdate, description, id_trunk, secondusedreal, secondusedcarrier, secondusedratecard, reftariffplan, idowner, dnidprefix, calleridprefix) VALUES (1, 0, 'Interne 1s=1Ar', '2026-08-05 11:38:28.829437', '2026-08-05 11:38:28.829437', NULL, 'Tarification appels internes', 0, 1751, 0, 0, 0, 0, 'all', 'all');
+INSERT INTO public.cc_tariffplan (id, iduser, tariffname, creationdate, startingdate, expirationdate, description, id_trunk, secondusedreal, secondusedcarrier, secondusedratecard, reftariffplan, idowner, dnidprefix, calleridprefix) VALUES (1, 0, 'Interne 1s=1Ar', '2026-08-22 19:03:17.739419', '2026-08-22 19:03:17.739419', NULL, 'Tarif interne standard', 0, 613, 0, 0, 0, 0, 'all', 'all');
 
 
 --
@@ -1653,7 +1666,7 @@ INSERT INTO public.cc_timezone (id, gmtzone, gmttime, gmtoffset) VALUES (75, '(G
 -- Data for Name: cc_trunk; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-INSERT INTO public.cc_trunk (id_trunk, trunkcode, trunkprefix, providertech, providerip, removeprefix, secondusedreal, secondusedcarrier, secondusedratecard, creationdate, failover_trunk, addparameter, id_provider, inuse, maxuse, status, if_max_use) VALUES (1, 'internal-pjsip', '', 'PJSIP', '%dialingnumber%', '', 1751, 0, 0, '2005-03-14 01:01:36', 0, '', NULL, 0, -1, 1, 0);
+INSERT INTO public.cc_trunk (id_trunk, trunkcode, trunkprefix, providertech, providerip, removeprefix, secondusedreal, secondusedcarrier, secondusedratecard, creationdate, failover_trunk, addparameter, id_provider, inuse, maxuse, status, if_max_use) VALUES (1, 'internal-pjsip', '', 'PJSIP', '%dialingnumber%', '', 2569, 0, 0, '2005-03-14 01:01:36', 0, '', NULL, 0, -1, 1, 0);
 
 
 --
@@ -1675,11 +1688,27 @@ INSERT INTO public.cc_version (version) VALUES ('1.7.0');
 -- Data for Name: cc_voucher; Type: TABLE DATA; Schema: public; Owner: -
 --
 
-INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (1, '2026-08-08 22:40:13.971501', '2026-08-08 22:46:53.480204', NULL, '123456', '1001', NULL, 500.0000, true, 1, 'USD');
-INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (2, '2026-08-09 07:33:04.716776', '2026-08-09 07:33:56.749666', NULL, '999888', '1001', NULL, 200.0000, true, 1, 'USD');
-INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (3, '2026-08-09 07:48:19.868829', '2026-08-09 07:48:38.618039', NULL, '111222', '1002', NULL, 300.0000, true, 1, 'USD');
-INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (4, '2026-08-09 08:36:31.632186', '2026-08-10 13:35:10.288496', NULL, '333444', '1002', NULL, 100.0000, true, 1, 'USD');
-INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (5, '2026-08-10 13:39:15.312136', NULL, NULL, 'TESTCODE123', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (1, '2026-08-23 05:20:20.632202', '2026-08-23 07:20:54.422504', NULL, '246411255453', '1001', NULL, 500.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (2, '2026-08-23 05:20:20.634408', '2026-08-23 08:08:29.25721', NULL, '075377472165', '1002', NULL, 500.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (3, '2026-08-23 05:20:20.647343', '2026-08-25 09:03:38.739841', NULL, '275767739512', '1002', NULL, 500.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (4, '2026-08-23 05:20:20.648413', '2026-08-25 09:34:54.890136', NULL, '974060940768', '1004', NULL, 500.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (7, '2026-08-23 19:02:40.816189', '2026-08-25 14:33:56.90575', NULL, '509349689851', '1006', NULL, 1000.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (9, '2026-08-25 15:32:08.149507', '2026-08-25 14:34:54.223208', NULL, '120874324735', '1006', NULL, 5000.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (10, '2026-08-26 11:20:09.318206', NULL, NULL, '332346518230', NULL, NULL, 1000.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (11, '2026-08-26 11:20:09.32253', '2026-08-26 13:25:25.390199', NULL, '208245149029', '1001', NULL, 1000.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (5, '2026-08-23 05:20:20.650683', '2026-08-26 16:07:49.441125', NULL, '890931412369', '1001', NULL, 500.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (6, '2026-08-23 19:02:40.812878', '2026-08-27 12:25:06.83671', NULL, '564870124925', '1001', NULL, 1000.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (13, '2026-08-27 10:49:55.875771', NULL, NULL, '554035534790', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (14, '2026-08-27 10:49:55.883124', NULL, NULL, '219926670510', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (15, '2026-08-27 10:49:55.895878', NULL, NULL, '705943278904', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (16, '2026-08-27 10:49:55.902217', NULL, NULL, '949109615960', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (17, '2026-08-27 10:49:55.911183', NULL, NULL, '440313221183', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (18, '2026-08-27 10:49:55.914793', NULL, NULL, '156566266524', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (19, '2026-08-27 10:49:55.916183', NULL, NULL, '909967573496', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (20, '2026-08-27 10:49:55.917097', NULL, NULL, '719639424173', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (21, '2026-08-27 10:49:55.918026', NULL, NULL, '708685326037', NULL, NULL, 500.0000, true, 0, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (8, '2026-08-25 15:32:08.146571', '2026-08-27 14:04:42.109629', NULL, '364146959696', '1001', NULL, 5000.0000, true, 1, 'MGA');
+INSERT INTO public.cc_voucher (id, creationdate, usedate, expirationdate, voucher, usedcardnumber, tag, credit, activated, used, currency) VALUES (12, '2026-08-27 10:49:55.873463', '2026-08-27 15:33:56.981658', NULL, '312005444491', '1002', NULL, 500.0000, true, 1, 'MGA');
 
 
 --
@@ -1777,7 +1806,7 @@ SELECT pg_catalog.setval('public.cc_callback_spool_id_seq', 1, false);
 -- Name: cc_callerid_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
 --
 
-SELECT pg_catalog.setval('public.cc_callerid_id_seq', 3, true);
+SELECT pg_catalog.setval('public.cc_callerid_id_seq', 6, true);
 
 
 --
@@ -1819,7 +1848,7 @@ SELECT pg_catalog.setval('public.cc_card_history_id_seq', 1, false);
 -- Name: cc_card_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
 --
 
-SELECT pg_catalog.setval('public.cc_card_id_seq', 4, true);
+SELECT pg_catalog.setval('public.cc_card_id_seq', 6, true);
 
 
 --
@@ -1973,7 +2002,7 @@ SELECT pg_catalog.setval('public.cc_logrefill_agent_id_seq', 1, false);
 -- Name: cc_logrefill_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
 --
 
-SELECT pg_catalog.setval('public.cc_logrefill_id_seq', 4, true);
+SELECT pg_catalog.setval('public.cc_logrefill_id_seq', 11, true);
 
 
 --
@@ -2267,12 +2296,12 @@ SELECT pg_catalog.setval('public.cc_ui_authen_userid_seq', 1, false);
 -- Name: cc_voucher_id_seq; Type: SEQUENCE SET; Schema: public; Owner: -
 --
 
-SELECT pg_catalog.setval('public.cc_voucher_id_seq', 5, true);
+SELECT pg_catalog.setval('public.cc_voucher_id_seq', 21, true);
 
 
 --
 -- PostgreSQL database dump complete
 --
 
-\unrestrict YeonoR0Z126dzeuqArGJZOTqlzxxa1Hz7Ots0ipFfq1HQtVlMWTlPcJ429Gy8bt
+\unrestrict bWdvzgv64AqpYAOZQ9WBPghqxSCHnRlmZqFjjrBesGnUAW3ioZDO4ma7MbryWHO
 

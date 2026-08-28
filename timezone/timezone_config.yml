@@ -7,6 +7,13 @@
 # (par défaut UTC ou Europe/Paris selon la box) et l'heure réelle de
 # l'utilisateur (Madagascar, UTC+3 - Indian/Antananarivo, EAT).
 #
+# Corrige AUSSI le fuseau horaire PostgreSQL lui-même (paramètre
+# "timezone" dans postgresql.conf), qui est indépendant du fuseau
+# horaire système Linux et peut rester désynchronisé (ex. UTC ou
+# Europe/Paris) même après correction de timedatectl - cause un
+# décalage entre NOW()/CURRENT_TIMESTAMP côté PostgreSQL et l'heure
+# réelle du système.
+#
 # Sans ce rôle, le décalage réapparaît à chaque reconstruction de VM
 # (vagrant destroy + vagrant up), puisque le fuseau horaire par défaut
 # de la box n'est pas Indian/Antananarivo.
@@ -16,21 +23,22 @@
 # conference_billing_log.call_date, cc_logrefill.date, etc. Un mauvais
 # fuseau horaire fausserait silencieusement toutes ces données.
 # =====================================================================
-- name: Configuration du fuseau horaire (Indian/Antananarivo) et NTP
+- name: Configuration du fuseau horaire (système + PostgreSQL) et NTP
   hosts: all
   become: true
 
   vars:
     target_timezone: "Indian/Antananarivo"
+    pg_conf_glob: "/etc/postgresql/*/main/postgresql.conf"
 
   tasks:
 
-    - name: Vérifier le fuseau horaire actuellement configuré
+    - name: Vérifier le fuseau horaire système actuellement configuré
       command: timedatectl show --property=Timezone --value
       register: current_timezone
       changed_when: false
 
-    - name: Définir le fuseau horaire sur {{ target_timezone }}
+    - name: Définir le fuseau horaire système sur {{ target_timezone }}
       command: timedatectl set-timezone {{ target_timezone }}
       when: current_timezone.stdout.strip() != target_timezone
 
@@ -49,6 +57,49 @@
       changed_when: false
       failed_when: false
 
+    # ---------------------------------------------------------------
+    # Fuseau horaire PostgreSQL (paramètre "timezone" du moteur lui-même,
+    # indépendant du fuseau horaire système)
+    # ---------------------------------------------------------------
+    - name: Trouver le(s) fichier(s) postgresql.conf réellement présents
+      find:
+        paths: /etc/postgresql
+        patterns: "postgresql.conf"
+        recurse: yes
+      register: pg_conf_files
+
+    - name: Définir le fuseau horaire dans postgresql.conf sur {{ target_timezone }}
+      lineinfile:
+        path: "{{ item.path }}"
+        regexp: "^#?timezone\\s*="
+        line: "timezone = '{{ target_timezone }}'"
+        backup: yes
+      loop: "{{ pg_conf_files.files }}"
+      loop_control:
+        label: "{{ item.path }}"
+      register: pg_timezone_updated
+
+    - name: Redémarrer PostgreSQL pour appliquer le nouveau fuseau horaire
+      systemd:
+        name: postgresql
+        state: restarted
+      when: pg_timezone_updated.results | selectattr('changed') | list | length > 0
+
+    - name: Attendre que PostgreSQL soit de nouveau prêt
+      command: pg_isready
+      register: pg_ready
+      retries: 10
+      delay: 2
+      until: pg_ready.rc == 0
+      changed_when: false
+      failed_when: false
+
+    - name: Récupérer l'heure actuelle vue par PostgreSQL (NOW())
+      command: sudo -u postgres psql -tAc "SELECT NOW();"
+      register: pg_now_check
+      changed_when: false
+      failed_when: false
+
     - name: Récupérer l'état final complet (timedatectl)
       command: timedatectl
       register: timedatectl_final
@@ -62,8 +113,10 @@
     - name: Afficher le résumé de la configuration horaire
       debug:
         msg:
-          - "--- État final (timedatectl) ---"
+          - "--- État final système (timedatectl) ---"
           - "{{ timedatectl_final.stdout_lines }}"
           - "--- Date/heure actuelle du système ---"
           - "{{ date_final.stdout }}"
-          - "Fuseau horaire configuré : {{ target_timezone }} (persistant, survit aux reconstructions de VM)."
+          - "--- Heure vue par PostgreSQL (NOW()) ---"
+          - "{{ pg_now_check.stdout | default('PostgreSQL non disponible au moment de la vérification') }}"
+          - "Fuseau horaire configuré : {{ target_timezone }} (système ET PostgreSQL, persistant, survit aux reconstructions de VM)."

@@ -27,7 +27,15 @@
 
   vars:
     pg_conf_dir: "/etc/postgresql/15/main"
-    dev_subnet: "192.168.0.0/24"
+    dev_windows_subnet: "192.168.0.0/24"
+    
+    pg_hba_rules:
+      - subnet: "{{ dev_windows_subnet }}"
+        auth_method: "scram-sha-256"
+        comment: "Accès depuis la machine hôte Windows (IDE, psql) - dev uniquement"
+      - subnet: "172.16.0.0/12"
+        auth_method: "md5"
+        comment: "Accès depuis le réseau bridge Docker (container voip-backend)"
 
   tasks:
 
@@ -45,19 +53,25 @@
         backup: yes
       register: listen_addresses_updated
 
-    - name: Vérifier si la règle réseau dev existe déjà dans pg_hba.conf
-      command: grep -F "{{ dev_subnet }}" "{{ pg_conf_dir }}/pg_hba.conf"
-      register: pg_hba_rule_exists
+    - name: Vérifier si chaque règle réseau existe déjà dans pg_hba.conf
+      command: grep -F "{{ item.subnet }}" "{{ pg_conf_dir }}/pg_hba.conf"
+      register: pg_hba_rules_exist
       changed_when: false
       failed_when: false
+      loop: "{{ pg_hba_rules }}"
+      loop_control:
+        label: "{{ item.subnet }}"
 
-    - name: Ajouter la règle d'accès réseau dev dans pg_hba.conf (scram-sha-256, cohérent avec le reste du fichier)
+    - name: Ajouter les règles d'accès réseau manquantes dans pg_hba.conf
       lineinfile:
         path: "{{ pg_conf_dir }}/pg_hba.conf"
-        line: "host    all    all    {{ dev_subnet }}    scram-sha-256"
+        line: "host    all    all    {{ item.item.subnet }}    {{ item.item.auth_method }}"
         insertafter: EOF
         backup: yes
-      when: pg_hba_rule_exists.rc != 0
+      when: item.rc != 0
+      loop: "{{ pg_hba_rules_exist.results }}"
+      loop_control:
+        label: "{{ item.item.subnet }}"
       register: pg_hba_updated
 
     - name: Redémarrer PostgreSQL si une modification a été appliquée
@@ -91,7 +105,7 @@
           - "[DEV] ACCÈS RÉSEAU POSTGRESQL OUVERT"
           - "========================================================"
           - "listen_addresses = '*' appliqué."
-          - "Règle pg_hba.conf ajoutée pour {{ dev_subnet }} (scram-sha-256)."
+          - "Règle pg_hba.conf ajoutée pour {{ dev_windows_subnet }} (scram-sha-256) et pour 172.16.0.0/12 (md5, réseau Docker)."
           - "--- Ports en écoute (vérifier 0.0.0.0:5432) ---"
           - "{{ ss_check.stdout_lines | select('search', '5432') | list }}"
           - "--- Adresse(s) IP de la VM (utiliser dans .env / IntelliJ) ---"

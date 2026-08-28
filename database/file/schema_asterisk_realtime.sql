@@ -2,10 +2,10 @@
 -- PostgreSQL database dump
 --
 
-\restrict mxJGklh4ML7WANH9wqGBjf4Jhzp53NeFvQBOfn6v9QvAAInvqzhbsxO1JaHGYiN
+\restrict 3OvvWT8fZUCt00sfbeFHXDbYq6RE338JAX3iPN3lpZGGBHtFKYdy0NIk4qWlc4c
 
--- Dumped from database version 15.18 (Debian 15.18-0+deb12u1)
--- Dumped by pg_dump version 15.18 (Debian 15.18-0+deb12u1)
+-- Dumped from database version 15.19 (Debian 15.19-0+deb12u1)
+-- Dumped by pg_dump version 15.19 (Debian 15.19-0+deb12u1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -328,6 +328,127 @@ CREATE TABLE public.alembic_version (
 
 
 --
+-- Name: asterisk_context_conferences; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.asterisk_context_conferences (
+    id integer NOT NULL,
+    context_nom character varying(50) NOT NULL,
+    room_number character varying(20) NOT NULL
+);
+
+
+--
+-- Name: asterisk_context_conferences_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.asterisk_context_conferences_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: asterisk_context_conferences_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.asterisk_context_conferences_id_seq OWNED BY public.asterisk_context_conferences.id;
+
+
+--
+-- Name: asterisk_context_includes; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.asterisk_context_includes (
+    id integer NOT NULL,
+    context_nom character varying(50) NOT NULL,
+    contexte_inclus_nom character varying(50) NOT NULL
+);
+
+
+--
+-- Name: asterisk_context_includes_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.asterisk_context_includes_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: asterisk_context_includes_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.asterisk_context_includes_id_seq OWNED BY public.asterisk_context_includes.id;
+
+
+--
+-- Name: asterisk_context_ivrs; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.asterisk_context_ivrs (
+    id integer NOT NULL,
+    context_nom character varying(50) NOT NULL,
+    ivr_numero character varying(20) NOT NULL
+);
+
+
+--
+-- Name: asterisk_context_ivrs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+--
+
+CREATE SEQUENCE public.asterisk_context_ivrs_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: asterisk_context_ivrs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+--
+
+ALTER SEQUENCE public.asterisk_context_ivrs_id_seq OWNED BY public.asterisk_context_ivrs.id;
+
+
+--
+-- Name: asterisk_contexts; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.asterisk_contexts (
+    nom character varying(50) NOT NULL,
+    facturation_active boolean DEFAULT false NOT NULL,
+    conference_active boolean DEFAULT false NOT NULL,
+    limite_duree_appel boolean DEFAULT false NOT NULL,
+    plage_facturation character varying(20),
+    plage_conference character varying(20),
+    created_at timestamp without time zone DEFAULT now() NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+
+--
+-- Name: asterisk_range_registry; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.asterisk_range_registry (
+    plage character varying(20) NOT NULL,
+    context_nom character varying(50),
+    feature character varying(20),
+    description character varying(200)
+);
+
+
+--
 -- Name: cdr; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -478,7 +599,7 @@ CREATE TABLE public.ivr_options (
     prompt_text text NOT NULL,
     action_type character varying(20) NOT NULL,
     action_target character varying(100),
-    CONSTRAINT ivr_options_action_type_check CHECK (((action_type)::text = ANY ((ARRAY['service'::character varying, 'submenu'::character varying, 'voicemail'::character varying, 'hangup'::character varying, 'repeat'::character varying])::text[])))
+    CONSTRAINT ivr_options_action_type_check CHECK (((action_type)::text = ANY (ARRAY[('service'::character varying)::text, ('submenu'::character varying)::text, ('voicemail'::character varying)::text, ('hangup'::character varying)::text, ('repeat'::character varying)::text])))
 );
 
 
@@ -512,7 +633,7 @@ CREATE TABLE public.ivr_services (
     destination_type character varying(20) NOT NULL,
     destination_value character varying(100) NOT NULL,
     created_at timestamp without time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ivr_services_destination_type_check CHECK (((destination_type)::text = ANY ((ARRAY['extension'::character varying, 'queue'::character varying, 'conference'::character varying])::text[])))
+    CONSTRAINT ivr_services_destination_type_check CHECK (((destination_type)::text = ANY (ARRAY[('extension'::character varying)::text, ('queue'::character varying)::text, ('conference'::character varying)::text])))
 );
 
 
@@ -1225,6 +1346,27 @@ ALTER SEQUENCE public.voicemail_uniqueid_seq OWNED BY public.voicemail.uniqueid;
 
 
 --
+-- Name: asterisk_context_conferences id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_conferences ALTER COLUMN id SET DEFAULT nextval('public.asterisk_context_conferences_id_seq'::regclass);
+
+
+--
+-- Name: asterisk_context_includes id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_includes ALTER COLUMN id SET DEFAULT nextval('public.asterisk_context_includes_id_seq'::regclass);
+
+
+--
+-- Name: asterisk_context_ivrs id; Type: DEFAULT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_ivrs ALTER COLUMN id SET DEFAULT nextval('public.asterisk_context_ivrs_id_seq'::regclass);
+
+
+--
 -- Name: conference_billing_log id; Type: DEFAULT; Schema: public; Owner: -
 --
 
@@ -1272,6 +1414,70 @@ ALTER TABLE ONLY public.voicemail ALTER COLUMN uniqueid SET DEFAULT nextval('pub
 
 ALTER TABLE ONLY public.alembic_version
     ADD CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num);
+
+
+--
+-- Name: asterisk_context_conferences asterisk_context_conferences_context_nom_room_number_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_conferences
+    ADD CONSTRAINT asterisk_context_conferences_context_nom_room_number_key UNIQUE (context_nom, room_number);
+
+
+--
+-- Name: asterisk_context_conferences asterisk_context_conferences_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_conferences
+    ADD CONSTRAINT asterisk_context_conferences_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: asterisk_context_includes asterisk_context_includes_context_nom_contexte_inclus_nom_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_includes
+    ADD CONSTRAINT asterisk_context_includes_context_nom_contexte_inclus_nom_key UNIQUE (context_nom, contexte_inclus_nom);
+
+
+--
+-- Name: asterisk_context_includes asterisk_context_includes_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_includes
+    ADD CONSTRAINT asterisk_context_includes_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: asterisk_context_ivrs asterisk_context_ivrs_context_nom_ivr_numero_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_ivrs
+    ADD CONSTRAINT asterisk_context_ivrs_context_nom_ivr_numero_key UNIQUE (context_nom, ivr_numero);
+
+
+--
+-- Name: asterisk_context_ivrs asterisk_context_ivrs_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_ivrs
+    ADD CONSTRAINT asterisk_context_ivrs_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: asterisk_contexts asterisk_contexts_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_contexts
+    ADD CONSTRAINT asterisk_contexts_pkey PRIMARY KEY (nom);
+
+
+--
+-- Name: asterisk_range_registry asterisk_range_registry_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_range_registry
+    ADD CONSTRAINT asterisk_range_registry_pkey PRIMARY KEY (plage);
 
 
 --
@@ -1693,6 +1899,54 @@ CREATE INDEX voicemail_messages_dir ON public.voicemail_messages USING btree (di
 
 
 --
+-- Name: asterisk_context_conferences asterisk_context_conferences_context_nom_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_conferences
+    ADD CONSTRAINT asterisk_context_conferences_context_nom_fkey FOREIGN KEY (context_nom) REFERENCES public.asterisk_contexts(nom) ON DELETE CASCADE;
+
+
+--
+-- Name: asterisk_context_conferences asterisk_context_conferences_room_number_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_conferences
+    ADD CONSTRAINT asterisk_context_conferences_room_number_fkey FOREIGN KEY (room_number) REFERENCES public.conference_rooms(room_number);
+
+
+--
+-- Name: asterisk_context_includes asterisk_context_includes_context_nom_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_includes
+    ADD CONSTRAINT asterisk_context_includes_context_nom_fkey FOREIGN KEY (context_nom) REFERENCES public.asterisk_contexts(nom) ON DELETE CASCADE;
+
+
+--
+-- Name: asterisk_context_includes asterisk_context_includes_contexte_inclus_nom_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_includes
+    ADD CONSTRAINT asterisk_context_includes_contexte_inclus_nom_fkey FOREIGN KEY (contexte_inclus_nom) REFERENCES public.asterisk_contexts(nom);
+
+
+--
+-- Name: asterisk_context_ivrs asterisk_context_ivrs_context_nom_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_ivrs
+    ADD CONSTRAINT asterisk_context_ivrs_context_nom_fkey FOREIGN KEY (context_nom) REFERENCES public.asterisk_contexts(nom) ON DELETE CASCADE;
+
+
+--
+-- Name: asterisk_context_ivrs asterisk_context_ivrs_ivr_numero_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.asterisk_context_ivrs
+    ADD CONSTRAINT asterisk_context_ivrs_ivr_numero_fkey FOREIGN KEY (ivr_numero) REFERENCES public.ivr_menus(number);
+
+
+--
 -- Name: musiconhold_entry fk_musiconhold_entry_name_musiconhold; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -1712,5 +1966,5 @@ ALTER TABLE ONLY public.ivr_options
 -- PostgreSQL database dump complete
 --
 
-\unrestrict mxJGklh4ML7WANH9wqGBjf4Jhzp53NeFvQBOfn6v9QvAAInvqzhbsxO1JaHGYiN
+\unrestrict 3OvvWT8fZUCt00sfbeFHXDbYq6RE338JAX3iPN3lpZGGBHtFKYdy0NIk4qWlc4c
 

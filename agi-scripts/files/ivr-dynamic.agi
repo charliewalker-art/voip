@@ -10,13 +10,15 @@ l'appel selon l'action configurée en base.
 Usage dans extensions.conf :
     exten => _9XX,1,AGI(ivr-dynamic.agi,${EXTEN})
 
-CORRECTIF : le contexte de destination pour les redirections (Goto) est
-désormais récupéré dynamiquement depuis les variables d'environnement AGI
-(agi_context), au lieu d'être codé en dur en "from-internal". Ce contexte
-n'existe plus depuis la mise en place du système de contextes dynamiques
-(le contexte réel s'appelle "internal", ou tout autre nom créé via l'API
-de gestion des contextes). Coder le contexte en dur casse le routage dès
-que le nom du contexte change.
+CORRECTIF (contexte dynamique) : le contexte de destination pour les
+redirections (Goto) est récupéré dynamiquement depuis les variables
+d'environnement AGI (agi_context), au lieu d'être codé en dur.
+
+CORRECTIF (messagerie vocale) : VoiceMailMain reçoit désormais directement
+la variable Python `callerid` (déjà proprement extraite de agi_callerid),
+au lieu de laisser Asterisk substituer ${CALLERID(num)} à l'intérieur de
+la commande EXEC. Cela garantit un identifiant de boîte propre et évite
+qu'Asterisk redemande le numéro de boîte en plus du mot de passe.
 """
 
 import sys
@@ -216,12 +218,26 @@ def run_menu(conn, menu_id, callerid, context, depth=0):
     # Cas spécial : menu dédié à la consultation de messagerie vocale.
     # On joue l'accueil (si défini) puis on route directement vers
     # VoiceMailMain, sans dérouler la logique d'options/DTMF classique.
+    #
+    # CORRECTIF : on utilise directement la variable Python `callerid`
+    # (déjà proprement extraite de agi_callerid dans main(), et déjà
+    # validée fonctionnelle par check_balance.py/recharge.py qui s'en
+    # servent pour identifier le compte via cc_callerid), plutôt que de
+    # laisser Asterisk substituer ${CALLERID(num)} à l'intérieur de la
+    # chaîne EXEC. Ce dernier procédé pouvait produire un format legerement
+    # différent (espaces, guillemets) empêchant VoiceMailMain de
+    # reconnaître automatiquement la boîte, et provoquant une demande du
+    # numéro de boîte EN PLUS du mot de passe au lieu du mot de passe seul.
     if is_voicemail_access:
-        logging.info("Menu '%s' (id=%s) : accès messagerie vocale", name, m_id)
+        logging.info("Menu '%s' (id=%s) : accès messagerie vocale (callerid=%s)", name, m_id, callerid)
         agi_send('EXEC Set "CHANNEL(language)=fr"')
         if welcome_text:
             agi_send('STREAM FILE "%s" ""' % piper_common.get_or_generate(welcome_text))
-        agi_send('EXEC VoiceMailMain "${CALLERID(num)}@default"')
+        if not callerid:
+            logging.error("CallerID vide, impossible d'identifier la boîte vocale automatiquement")
+            agi_send('EXEC VoiceMailMain "@default"')
+        else:
+            agi_send('EXEC VoiceMailMain "%s@default"' % callerid)
         return
 
     options = get_options(conn, m_id)
@@ -294,7 +310,7 @@ def main():
         sys.exit(1)
 
     number = sys.argv[1]
-    logging.info("=== Nouvel appel IVR, numéro composé : %s (contexte: %s) ===", number, context)
+    logging.info("=== Nouvel appel IVR, numéro composé : %s (contexte: %s, callerid: %s) ===", number, context, callerid)
 
     try:
         conn = psycopg2.connect(**DB_CONFIG)

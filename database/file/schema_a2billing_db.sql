@@ -2,10 +2,10 @@
 -- PostgreSQL database dump
 --
 
-\restrict imrhuaxqAYm2vWWOrFwUT9g74nAI7sEXrI6fKR5I0mdxJFkqNQtprKUfaUMrxrL
+\restrict zRkP3S5aJCTdzujdGSKy6uaqrDDdrRNR4UfbBRwxb2QM5uj0gmjlSqEy9UpgVRX
 
--- Dumped from database version 15.18 (Debian 15.18-0+deb12u1)
--- Dumped by pg_dump version 15.18 (Debian 15.18-0+deb12u1)
+-- Dumped from database version 15.19 (Debian 15.19-0+deb12u1)
+-- Dumped by pg_dump version 15.19 (Debian 15.19-0+deb12u1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -24,6 +24,7 @@ SET row_security = off;
 
 CREATE FUNCTION public.cc_card_serial_set() RETURNS trigger
     LANGUAGE plpgsql
+    SET search_path TO 'public'
     AS $$
   BEGIN
     UPDATE cc_card_seria SET value=value+1 WHERE id=NEW.id_seria;
@@ -39,6 +40,7 @@ $$;
 
 CREATE FUNCTION public.cc_card_serial_update() RETURNS trigger
     LANGUAGE plpgsql
+    SET search_path TO 'public'
     AS $$
   BEGIN
     IF NEW.id_seria IS NOT NULL AND NEW.id_seria = OLD.id_seria THEN
@@ -57,6 +59,7 @@ $$;
 
 CREATE FUNCTION public.cc_ratecard_validate_regex() RETURNS trigger
     LANGUAGE plpgsql
+    SET search_path TO 'public'
     AS $_$
   BEGIN
     IF SUBSTRING(new.dialprefix,1,1) != '_' THEN
@@ -773,7 +776,8 @@ CREATE TABLE public.cc_ratecard (
     additional_grace integer DEFAULT 0 NOT NULL,
     minimal_cost numeric(15,5) DEFAULT 0 NOT NULL,
     announce_time_correction numeric(5,3) DEFAULT 1.0 NOT NULL,
-    disconnectcharge_after integer DEFAULT 0 NOT NULL
+    disconnectcharge_after integer DEFAULT 0 NOT NULL,
+    CONSTRAINT chk_timechargea_coherent CHECK (((chargea = (0)::numeric) OR (timechargea > 0)))
 );
 
 
@@ -5357,5 +5361,5 @@ ALTER TABLE ONLY public.cc_ticket_comment
 -- PostgreSQL database dump complete
 --
 
-\unrestrict imrhuaxqAYm2vWWOrFwUT9g74nAI7sEXrI6fKR5I0mdxJFkqNQtprKUfaUMrxrL
+\unrestrict zRkP3S5aJCTdzujdGSKy6uaqrDDdrRNR4UfbBRwxb2QM5uj0gmjlSqEy9UpgVRX
 
