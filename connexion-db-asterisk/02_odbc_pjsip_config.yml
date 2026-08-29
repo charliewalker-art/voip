@@ -23,6 +23,18 @@
 # normal et attendu que "pjsip show transports" ou "odbc show all"
 # ne remontent pas encore de données applicatives - seule la
 # CONNEXION elle-même est vérifiée ici, pas le contenu des tables.
+#
+# CORRECTIF CRLF/LF : les 6 fichiers sont copiés depuis la machine de
+# contrôle Windows via `copy`, octet pour octet - même mécanisme de
+# transport que les autres rôles déjà corrigés. Risque fonctionnel
+# jugé faible (parseur natif config.c d'Asterisk, tolérant au \r de
+# fin de ligne, comme confirmé sur internal.conf et confbridge.conf),
+# à l'exception notable de odbc.ini : ce fichier suit le format
+# unixODBC (ini-style), lu par la libodbc système et non par le
+# parseur Asterisk - comportement non vérifié ici, donc traité par
+# précaution comme les autres. Correctif appliqué aux 6 fichiers par
+# cohérence de défense en profondeur, à faible coût (dos2unix
+# idempotent), avant le restart complet du service.
 # =====================================================================
 - name: Configuration de la connexion realtime ODBC/PJSIP Asterisk
   hosts: all
@@ -31,7 +43,22 @@
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Copie des fichiers de connexion (avec sauvegarde de l'existant)
+    # 1. Dépendance système : dos2unix, nécessaire pour le correctif
+    #    CRLF ci-dessous. Rôle autonome et rejouable indépendamment
+    #    même si dos2unix est déjà installé par un autre rôle.
+    # ---------------------------------------------------------------
+    - name: S'assurer que dos2unix est installé
+      apt:
+        name: dos2unix
+        state: present
+        update_cache: yes
+      register: apt_dos2unix_result
+      retries: 5
+      delay: 15
+      until: apt_dos2unix_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Copie des fichiers de connexion (avec sauvegarde de l'existant)
     # ---------------------------------------------------------------
     - name: Copier /etc/odbc.ini
       copy:
@@ -88,8 +115,41 @@
         backup: yes
       register: voicemail_conf_copy
 
+    # =================================================================
+    # 2bis. CORRECTIF CRLF -> LF sur les 6 fichiers de connexion
+    #    (avant le restart complet d'Asterisk)
+    # =================================================================
+    - name: "CRLF->LF : convertir les 6 fichiers de connexion ODBC/PJSIP"
+      command: "dos2unix {{ item }}"
+      loop:
+        - /etc/odbc.ini
+        - /etc/asterisk/res_odbc.conf
+        - /etc/asterisk/sorcery.conf
+        - /etc/asterisk/extconfig.conf
+        - /etc/asterisk/cdr_adaptive_odbc.conf
+        - /etc/asterisk/voicemail.conf
+      register: dos2unix_odbc_pjsip
+      changed_when: "'converting' in dos2unix_odbc_pjsip.stderr"
+
+    - name: "CRLF->LF : vérifier l'absence de \\r résiduel (6 fichiers ODBC/PJSIP)"
+      shell: >
+        set -o pipefail;
+        grep -lU $'\r'
+        /etc/odbc.ini
+        /etc/asterisk/res_odbc.conf
+        /etc/asterisk/sorcery.conf
+        /etc/asterisk/extconfig.conf
+        /etc/asterisk/cdr_adaptive_odbc.conf
+        /etc/asterisk/voicemail.conf
+        || true
+      args:
+        executable: /bin/bash
+      register: crlf_residual_odbc_check
+      changed_when: false
+      failed_when: crlf_residual_odbc_check.stdout | trim | length > 0
+
     # ---------------------------------------------------------------
-    # 2. Redémarrage complet (obligatoire pour sorcery.conf/extconfig.conf)
+    # 3. Redémarrage complet (obligatoire pour sorcery.conf/extconfig.conf)
     # ---------------------------------------------------------------
     - name: Redémarrer Asterisk (restart complet requis)
       systemd:
@@ -106,7 +166,7 @@
         seconds: 3
 
     # ---------------------------------------------------------------
-    # 3. Vérifications post-déploiement
+    # 4. Vérifications post-déploiement
     # ---------------------------------------------------------------
     - name: Vérifier le statut du service asterisk
       command: systemctl is-active asterisk
@@ -154,5 +214,7 @@
           - "{{ voicemail_module_check.stdout }}"
           - "--- PJSIP transports (vide = normal, pas encore de schéma/données - rôle 03 à venir) ---"
           - "{{ pjsip_transports_check.stdout }}"
+          - "--- Fins de ligne CRLF -> LF sur les 6 fichiers de connexion ---"
+          - "Convertis (dos2unix), aucun \\r résiduel confirmé."
           - "Fichiers de connexion realtime déployés avec succès (odbc.ini, res_odbc.conf, sorcery.conf, extconfig.conf, cdr_adaptive_odbc.conf, voicemail.conf)."
           - "Prochaine étape : rôle 03_database_schema.yml (schema.sql + seed_data.sql)."

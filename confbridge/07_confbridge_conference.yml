@@ -20,6 +20,17 @@
 # Restart/reload : d'après la carte validée en audit (section 6),
 # "module reload app_confbridge.so" suffit - pas de restart complet
 # nécessaire (contrairement à sorcery.conf/extconfig.conf).
+#
+# CORRECTIF CRLF/LF : confbridge.conf est copié depuis la machine de
+# contrôle Windows via `copy`, octet pour octet, même mécanisme de
+# transport que les autres fichiers .conf déjà traités. Risque
+# fonctionnel réel jugé faible ici (le parseur natif d'Asterisk
+# config.c tronque le \r de fin de ligne à la lecture, comme confirmé
+# lors de l'analyse de internal.conf, rôle 08_dialplan.yml - aucune
+# valeur littérale comparée strictement dans ce fichier, uniquement
+# des paramètres de profils bridge/user), mais le correctif est
+# appliqué par cohérence de défense en profondeur avec le reste du
+# projet, à faible coût (dos2unix idempotent).
 # =====================================================================
 - name: Configuration ConfBridge (conférences téléphoniques)
   hosts: all
@@ -28,7 +39,22 @@
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Copie de confbridge.conf
+    # 1. Dépendance système : dos2unix, nécessaire pour le correctif
+    #    CRLF ci-dessous. Rôle autonome et rejouable indépendamment
+    #    même si dos2unix est déjà installé par un autre rôle.
+    # ---------------------------------------------------------------
+    - name: S'assurer que dos2unix est installé
+      apt:
+        name: dos2unix
+        state: present
+        update_cache: yes
+      register: apt_dos2unix_result
+      retries: 5
+      delay: 15
+      until: apt_dos2unix_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Copie de confbridge.conf
     # ---------------------------------------------------------------
     - name: Copier /etc/asterisk/confbridge.conf
       copy:
@@ -40,8 +66,26 @@
         backup: yes
       register: confbridge_conf_copy
 
+    # =================================================================
+    # 2bis. CORRECTIF CRLF -> LF sur confbridge.conf
+    # =================================================================
+    - name: "CRLF->LF : convertir confbridge.conf"
+      command: "dos2unix /etc/asterisk/confbridge.conf"
+      register: dos2unix_confbridge
+      changed_when: "'converting' in dos2unix_confbridge.stderr"
+
+    - name: "CRLF->LF : vérifier l'absence de \\r résiduel dans confbridge.conf"
+      shell: >
+        set -o pipefail;
+        grep -lU $'\r' /etc/asterisk/confbridge.conf || true
+      args:
+        executable: /bin/bash
+      register: crlf_residual_confbridge_check
+      changed_when: false
+      failed_when: crlf_residual_confbridge_check.stdout | trim | length > 0
+
     # ---------------------------------------------------------------
-    # 2. Reload du module (pas de restart complet nécessaire)
+    # 3. Reload du module (pas de restart complet nécessaire)
     # ---------------------------------------------------------------
     - name: Recharger le module app_confbridge.so
       command: /usr/sbin/asterisk -rx "module reload app_confbridge.so"
@@ -53,7 +97,7 @@
         seconds: 2
 
     # ---------------------------------------------------------------
-    # 3. Vérifications finales
+    # 4. Vérifications finales
     # ---------------------------------------------------------------
     - name: Vérifier que le module app_confbridge est toujours actif après reload
       command: /usr/sbin/asterisk -rx "module show like app_confbridge"
@@ -92,5 +136,7 @@
           - "{{ confbridge_user_profile_check.stdout }}"
           - "--- Salles de conférence en base (attendu : 3000 sans PIN non facturée, 3001 PIN 1234 facturée) ---"
           - "{{ conference_rooms_check.stdout_lines }}"
+          - "--- Fins de ligne CRLF -> LF sur confbridge.conf ---"
+          - "Converti (dos2unix), aucun \\r résiduel confirmé."
           - "ConfBridge configuré avec succès. Fonctionnalité complète : confbridge.conf (ce rôle) + conference-entry.agi (rôle 05) + données conference_rooms (rôle 03)."
           - "Prochaine étape : rôle 08_dialplan.yml (extensions.conf final, qui active le routage _3XXX vers conference-entry.agi)."

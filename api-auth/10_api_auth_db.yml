@@ -15,6 +15,12 @@
 # commandes directes "sudo -u postgres psql" (pas de modules
 # postgresql_user/postgresql_db - évite le bug ACL become_user déjà
 # rencontré et documenté au rôle 01).
+#
+# CORRECTIF CRLF/LF : schema.sql et seed_user.sql sont copiés depuis
+# la machine de contrôle Windows via le module `copy`, qui transfère
+# les fichiers octet pour octet. Même mécanisme et même correctif que
+# 03_database_schema.yml : dos2unix appliqué après la copie sur la VM,
+# avant tout import psql -f. Idempotent, sans "when" nécessaire.
 # =====================================================================
 - name: Création de la base d'authentification de l'API
   hosts: all
@@ -33,7 +39,22 @@
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Locale (déjà générée par le rôle 01 en théorie, mais ce rôle
+    # 1. Dépendance système : dos2unix, nécessaire pour le correctif
+    #    CRLF ci-dessous. Rôle autonome et rejouable indépendamment
+    #    même si dos2unix est déjà installé par un autre rôle.
+    # ---------------------------------------------------------------
+    - name: S'assurer que dos2unix est installé
+      apt:
+        name: dos2unix
+        state: present
+        update_cache: yes
+      register: apt_dos2unix_result
+      retries: 5
+      delay: 15
+      until: apt_dos2unix_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Locale (déjà générée par le rôle 01 en théorie, mais ce rôle
     #    reste autonome et rejouable indépendamment)
     # ---------------------------------------------------------------
     - name: S'assurer que la locale fr_FR.UTF-8 est déclarée dans /etc/locale.gen
@@ -48,7 +69,7 @@
       when: locale_gen_updated is changed
 
     # ---------------------------------------------------------------
-    # 2. Attente de la disponibilité du cluster PostgreSQL
+    # 3. Attente de la disponibilité du cluster PostgreSQL
     #    (le service est déjà installé/démarré par le rôle 01)
     # ---------------------------------------------------------------
     - name: Attendre que PostgreSQL accepte les connexions locales
@@ -60,7 +81,7 @@
       changed_when: false
 
     # ---------------------------------------------------------------
-    # 3. Création de l'utilisateur api_user
+    # 4. Création de l'utilisateur api_user
     # ---------------------------------------------------------------
     - name: Vérifier si l'utilisateur api_user existe déjà
       command: >-
@@ -77,7 +98,7 @@
       when: api_user_exists.stdout.strip() != "1"
 
     # ---------------------------------------------------------------
-    # 4. Création de la base api_auth_db (owner api_user)
+    # 5. Création de la base api_auth_db (owner api_user)
     # ---------------------------------------------------------------
     - name: Vérifier si la base api_auth_db existe déjà
       command: >-
@@ -95,7 +116,7 @@
       when: api_db_exists.stdout.strip() != "1"
 
     # ---------------------------------------------------------------
-    # 5. Création de la table api_users + seed du premier admin
+    # 6. Création de la table api_users + seed du premier admin
     #    (fichiers SQL externalisés dans files/, même logique que le
     #    rôle 03_database_schema.yml - schema.sql / seed_data.sql
     #    séparés, pas de SQL en dur dans le playbook)
@@ -114,6 +135,31 @@
       loop:
         - schema.sql
         - seed_user.sql
+
+    # =================================================================
+    # 6bis. CORRECTIF CRLF -> LF sur schema.sql et seed_user.sql
+    #    (avant tout import, même schéma que 03_database_schema.yml)
+    # =================================================================
+    - name: "CRLF->LF : convertir schema.sql et seed_user.sql"
+      command: "dos2unix /tmp/api_auth_sql/{{ item }}"
+      loop:
+        - schema.sql
+        - seed_user.sql
+      register: dos2unix_api_auth_sql
+      changed_when: "'converting' in dos2unix_api_auth_sql.stderr"
+
+    - name: "CRLF->LF : vérifier l'absence de \\r résiduel (schema.sql, seed_user.sql)"
+      shell: >
+        set -o pipefail;
+        grep -lU $'\r'
+        /tmp/api_auth_sql/schema.sql
+        /tmp/api_auth_sql/seed_user.sql
+        || true
+      args:
+        executable: /bin/bash
+      register: crlf_residual_api_auth_check
+      changed_when: false
+      failed_when: crlf_residual_api_auth_check.stdout | trim | length > 0
 
     - name: Vérifier si la table api_users existe déjà
       command: >-
@@ -142,7 +188,7 @@
         PGPASSWORD: "{{ api_db_password }}"
 
     # ---------------------------------------------------------------
-    # 6. Vérifications finales
+    # 7. Vérifications finales
     # ---------------------------------------------------------------
     - name: Vérifier la structure de la table api_users
       command: >-
@@ -169,5 +215,7 @@
           - "{{ api_users_structure_check.stdout }}"
           - "--- Test connexion api_user ---"
           - "{{ api_conn_check.stdout }}"
+          - "--- Fins de ligne CRLF -> LF sur schema.sql et seed_user.sql ---"
+          - "Convertis avant import (dos2unix), aucun \\r résiduel confirmé."
           - "Base d'authentification prête. Aucune donnée métier VoIP mélangée (asterisk_realtime et a2billing_db restent inchangées)."
           - "Utilisateur admin amorcé automatiquement (username: admin, mot de passe initial: admin123 - À CHANGER après le premier login)."

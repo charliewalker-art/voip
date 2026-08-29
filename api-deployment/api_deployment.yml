@@ -16,6 +16,23 @@
 # Copié tel quel pour l'instant (cohérent avec le reste du projet),
 # à vaulter avant tout déploiement en dehors d'un contexte de
 # développement/démo. Ne JAMAIS committer ce fichier dans un dépôt Git.
+#
+# CORRECTIF CRLF/LF : .env est édité sur une machine de contrôle
+# Windows (confirmé : 31 CR / 31 LF appariés dans le fichier source,
+# CRLF standard, comportement normal côté Windows). Le vrai risque
+# n'est PAS le fichier source lui-même, mais le fait que `copy` le
+# transfère octet pour octet sur la VM Linux, où il est ensuite lu
+# par Docker Compose via `env_file:` (confirmé dans docker-compose.yml,
+# service voip-backend). Le parsing `env_file` de Compose découpe les
+# lignes sur `\n` et ne retire pas toujours le `\r` en fin de valeur
+# selon la version du moteur - un `ASTERISK_DB_PASSWORD=asterisk\r`
+# ferait échouer silencieusement la connexion PostgreSQL du backend,
+# avec une erreur d'authentification qui ne révèle jamais la vraie
+# cause. Un correctif dos2unix ciblé est donc appliqué après la copie
+# de .env, docker-compose.yml et nginx-proxy.conf, avant tout
+# `docker compose pull`/`up`. Ce fichier n'étant pas versionné dans
+# Git (.gitignore), il ne bénéficie d'aucune protection .gitattributes
+# - ce correctif Ansible est donc la SEULE ligne de défense.
 # =====================================================================
 - name: Déploiement de l'API VoIP et du frontend (Docker Compose)
   hosts: all
@@ -27,7 +44,23 @@
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Préparation du dossier de déploiement
+    # 1. Dépendance système : dos2unix, nécessaire pour le correctif
+    #    CRLF ci-dessous. Ce rôle reste autonome et rejouable
+    #    indépendamment même si dos2unix est déjà installé par un
+    #    autre rôle (05_agi_scripts.yml / 06_a2billing_install.yml).
+    # ---------------------------------------------------------------
+    - name: S'assurer que dos2unix est installé
+      apt:
+        name: dos2unix
+        state: present
+        update_cache: yes
+      register: apt_dos2unix_result
+      retries: 5
+      delay: 15
+      until: apt_dos2unix_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Préparation du dossier de déploiement
     # ---------------------------------------------------------------
     - name: Créer le dossier de déploiement /opt/voip-api
       file:
@@ -36,7 +69,7 @@
         mode: '0755'
 
     # ---------------------------------------------------------------
-    # 2. Copie des fichiers de configuration
+    # 3. Copie des fichiers de configuration
     # ---------------------------------------------------------------
     - name: Copier docker-compose.yml
       copy:
@@ -62,8 +95,69 @@
         backup: yes
       register: nginx_conf_copy
 
+    # =================================================================
+    # 4. CORRECTIF CRLF -> LF (ciblé, sur les 3 fichiers texte copiés
+    #    ci-dessus, avant le pull/up Docker Compose)
+    #
+    #    Priorité absolue : .env, car c'est le seul des trois qui n'est
+    #    jamais protégé par .gitattributes (fichier hors dépôt Git par
+    #    principe de sécurité). docker-compose.yml et nginx-proxy.conf
+    #    sont traités par cohérence/défense en profondeur, même s'ils
+    #    sont normalement couverts par .gitattributes s'ils sont
+    #    versionnés.
+    #
+    #    dos2unix est idempotent : si un fichier est déjà en LF, il
+    #    n'est pas modifié. mode='0600' de .env est préservé par
+    #    dos2unix (il édite en place, ne recrée pas le fichier).
+    # =================================================================
+    - name: "CRLF->LF : convertir .env (priorité - hors Git, seule protection possible)"
+      command: "dos2unix {{ deployment_dir }}/.env"
+      register: dos2unix_env
+      changed_when: "'converting' in dos2unix_env.stderr"
+
+    - name: "CRLF->LF : convertir docker-compose.yml"
+      command: "dos2unix {{ deployment_dir }}/docker-compose.yml"
+      register: dos2unix_compose
+      changed_when: "'converting' in dos2unix_compose.stderr"
+
+    - name: "CRLF->LF : convertir nginx-proxy.conf"
+      command: "dos2unix {{ deployment_dir }}/nginx-proxy.conf"
+      register: dos2unix_nginx
+      changed_when: "'converting' in dos2unix_nginx.stderr"
+
     # ---------------------------------------------------------------
-    # 3. Créer le dossier de stockage Ansible monté dans le container
+    # 4bis. Vérification défensive : aucun \r ne doit subsister.
+    #    On échoue explicitement plutôt que de laisser un mot de passe
+    #    corrompu par un \r atteindre "docker compose up" en silence.
+    # ---------------------------------------------------------------
+    - name: "CRLF->LF : vérifier l'absence de \\r résiduel (.env, docker-compose.yml, nginx-proxy.conf)"
+      shell: >
+        set -o pipefail;
+        grep -lU $'\r'
+        {{ deployment_dir }}/.env
+        {{ deployment_dir }}/docker-compose.yml
+        {{ deployment_dir }}/nginx-proxy.conf
+        || true
+      args:
+        executable: /bin/bash
+      register: crlf_residual_check
+      changed_when: false
+      failed_when: crlf_residual_check.stdout | trim | length > 0
+
+    # ---------------------------------------------------------------
+    # 5. Vérifier que les permissions de .env n'ont pas été altérées
+    #    par dos2unix (garde-fou, dos2unix édite normalement en place
+    #    sans toucher au mode, mais on vérifie explicitement plutôt
+    #    que de supposer)
+    # ---------------------------------------------------------------
+    - name: Vérifier que .env conserve ses permissions restreintes (0600) après conversion
+      stat:
+        path: "{{ deployment_dir }}/.env"
+      register: env_perms_check
+      failed_when: env_perms_check.stat.mode != '0600'
+
+    # ---------------------------------------------------------------
+    # 6. Créer le dossier de stockage Ansible monté dans le container
     #    (référencé dans docker-compose.yml : /opt/ansible_storage)
     # ---------------------------------------------------------------
     - name: Créer le dossier /opt/ansible_storage (monté dans voip-backend)
@@ -73,7 +167,7 @@
         mode: '0755'
 
     # ---------------------------------------------------------------
-    # 4. Tirer les dernières images depuis GHCR (ligne de commande directe)
+    # 7. Tirer les dernières images depuis GHCR (ligne de commande directe)
     # ---------------------------------------------------------------
     - name: Tirer les images Docker définies dans docker-compose.yml
       command: docker compose pull
@@ -82,13 +176,13 @@
       register: images_pull
 
     # ---------------------------------------------------------------
-    # 5. Démarrer/mettre à jour les containers
+    # 8. Démarrer/mettre à jour les containers
     #    NOTE : on ne va PAS attendre/vérifier que les containers soient
     #    réellement démarrés et fonctionnels - l'IP/configuration réseau
     #    (.env) peut varier selon l'environnement de déploiement, donc un
     #    healthcheck bloquant ici donnerait de faux échecs. Le script se
     #    contente de lancer "docker compose up -d" (qui attend nativement
-    #    la fin du téléchargement des images, déjà fait à l'étape 4) et
+    #    la fin du téléchargement des images, déjà fait à l'étape 7) et
     #    remonte l'état brut sans retry/polling.
     # ---------------------------------------------------------------
     - name: Démarrer les containers (docker compose up -d)
@@ -98,7 +192,7 @@
       register: compose_up
 
     # ---------------------------------------------------------------
-    # 6. État final (informatif uniquement, non bloquant)
+    # 9. État final (informatif uniquement, non bloquant)
     # ---------------------------------------------------------------
     - name: Vérifier l'état des containers (informatif, non bloquant)
       command: docker compose ps
@@ -111,6 +205,10 @@
     - name: Afficher le résumé du déploiement
       debug:
         msg:
+          - "--- Fins de ligne CRLF -> LF ---"
+          - ".env, docker-compose.yml et nginx-proxy.conf normalisés en LF, aucun \\r résiduel (vérifié explicitement)."
+          - "--- Permissions .env ---"
+          - "0600 confirmé après conversion dos2unix."
           - "--- Sortie de 'docker compose up -d' ---"
           - "{{ compose_up.stdout_lines }}"
           - "--- État des containers au moment de la vérification (peut encore être en cours de démarrage) ---"

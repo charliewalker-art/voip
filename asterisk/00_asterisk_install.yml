@@ -23,7 +23,7 @@
         update_cache: yes
         cache_valid_time: 3600
 
-    - name: Ajouter des retries/timeouts APT (réseau instable)
+    - name: Ajouter des retries/timeouts APT (réseau instable)f
       copy:
         dest: /etc/apt/apt.conf.d/80-retries
         content: |

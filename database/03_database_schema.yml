@@ -29,6 +29,26 @@
 #    Ce rôle importe donc une copie fidèle SANS ces contraintes (à
 #    ajouter séparément si décidé plus tard - non fait ici par défaut).
 #
+# 4. CORRECTIF CRLF/LF - fichiers .sql (dumps pg_dump)
+#    Contexte : une contamination \r a été trouvée dans
+#    ivr_menus.welcome_text sur une VM déployée, mais la vérification
+#    sur la VM d'origine (192.168.0.118, pg_dump direct) montre une
+#    donnée propre (aucun \r). La contamination n'est donc PAS dans la
+#    donnée source, mais s'est produite quelque part dans la chaîne de
+#    transport des dumps .sql entre la VM d'origine et la VM cible
+#    (regénération via scp binaire depuis la VM source = fichiers
+#    intacts en LF ; mais rien ne garantit qu'ils le restent une fois
+#    sur la machine de contrôle Windows si un outil les retouche).
+#    Cohérent avec l'approche déjà appliquée sur 05_agi_scripts.yml et
+#    06_a2billing_install.yml : le correctif se fait sur le FICHIER,
+#    après sa copie sur la VM cible - pas sur la donnée après import
+#    (pas d'UPDATE ici, volontairement, cf. décision du 29/08/2026).
+#    Cible : les 4 dumps (schema_*.sql et data_*.sql), puisque
+#    n'importe lequel pourrait un jour contenir une valeur texte
+#    multi-ligne éditée sous Windows entre deux regénérations.
+#    dos2unix est idempotent : si un fichier est déjà en LF (cas normal
+#    après scp depuis la VM source), rien n'est modifié.
+#
 # Pas de restart/reload Asterisk nécessaire après ce rôle : les requêtes
 # realtime sont faites à la demande, sans cache, donc les nouvelles
 # données sont immédiatement visibles sans redémarrage.
@@ -51,7 +71,23 @@
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Préparation : dossier de staging + copie des 4 dumps SQL
+    # 1. Dépendance système : dos2unix, nécessaire pour le correctif
+    #    CRLF ci-dessous. Rôle autonome et rejouable indépendamment
+    #    même si dos2unix est déjà installé par un autre rôle.
+    # ---------------------------------------------------------------
+    - name: S'assurer que dos2unix est installé
+      apt:
+        name: dos2unix
+        state: present
+        update_cache: yes
+      become: true
+      register: apt_dos2unix_result
+      retries: 5
+      delay: 15
+      until: apt_dos2unix_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Préparation : dossier de staging + copie des 4 dumps SQL
     # ---------------------------------------------------------------
     - name: Créer le dossier de staging pour les dumps SQL
       file:
@@ -70,8 +106,36 @@
         - data_asterisk_realtime.sql
         - data_a2billing_db.sql
 
+    # =================================================================
+    # 2bis. CORRECTIF CRLF -> LF sur les 4 dumps .sql (avant tout import)
+    # =================================================================
+    - name: "CRLF->LF : convertir les 4 dumps .sql"
+      command: "dos2unix {{ sql_import_dir }}/{{ item }}"
+      loop:
+        - schema_asterisk_realtime.sql
+        - schema_a2billing_db.sql
+        - data_asterisk_realtime.sql
+        - data_a2billing_db.sql
+      register: dos2unix_sql_dumps
+      changed_when: "'converting' in dos2unix_sql_dumps.stderr"
+
+    - name: "CRLF->LF : vérifier l'absence de \\r résiduel dans les dumps .sql"
+      shell: >
+        set -o pipefail;
+        grep -lU $'\r'
+        {{ sql_import_dir }}/schema_asterisk_realtime.sql
+        {{ sql_import_dir }}/schema_a2billing_db.sql
+        {{ sql_import_dir }}/data_asterisk_realtime.sql
+        {{ sql_import_dir }}/data_a2billing_db.sql
+        || true
+      args:
+        executable: /bin/bash
+      register: crlf_residual_sql_check
+      changed_when: false
+      failed_when: crlf_residual_sql_check.stdout | trim | length > 0
+
     # ---------------------------------------------------------------
-    # 2. Import du schéma - asterisk_realtime
+    # 3. Import du schéma - asterisk_realtime
     #    Garde-fou idempotence : on vérifie l'existence de la table
     #    ivr_menus (spécifique au projet, ne peut pas venir d'ailleurs)
     # ---------------------------------------------------------------
@@ -95,7 +159,7 @@
       register: asterisk_schema_import
 
     # ---------------------------------------------------------------
-    # 3. Import des données - asterisk_realtime
+    # 3bis. Import des données - asterisk_realtime
     #    Garde-fou idempotence : on vérifie s'il y a déjà des lignes
     #    dans ps_endpoints (table peuplée dès le premier seed)
     # ---------------------------------------------------------------
@@ -241,5 +305,7 @@
           - "{{ ps_endpoints_check.stdout_lines }}"
           - "--- Cartes A2Billing (cc_card) ---"
           - "{{ cc_card_check.stdout_lines }}"
+          - "--- Fins de ligne CRLF -> LF sur les 4 dumps .sql ---"
+          - "Convertis avant import (dos2unix), aucun \\r résiduel confirmé."
           - "NOTE : le compte 1003 est présent côté PJSIP mais absent côté cc_card - bug connu et documenté par l'audit IAREVIEW, non corrigé dans cet import (copie fidèle de l'état réel)."
           - "NOTE : les contraintes UNIQUE recommandées par l'audit sur ivr_services / cc_tariffgroup / cc_ratecard n'ont PAS été ajoutées - le schéma importé est une copie fidèle de l'état réel de la VM de référence."

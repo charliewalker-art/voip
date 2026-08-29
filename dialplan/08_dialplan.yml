@@ -23,6 +23,20 @@
 #
 # Restart/reload : d'après la carte validée en audit (section 6),
 # "dialplan reload" suffit - pas de restart complet nécessaire.
+#
+# CORRECTIF CRLF/LF : extensions.conf et internal.conf sont copiés
+# depuis la machine de contrôle Windows via `copy`, octet pour octet.
+# Analyse préalable de internal.conf (contenu réel examiné) : aucune
+# comparaison de chaîne littérale vulnérable identifiée - toutes les
+# conditions (${DIALSTATUS}, ${VM_INFO(...)}) portent sur des variables
+# de canal générées par Asterisk au moment de l'appel, pas sur du texte
+# lu depuis le fichier ; la seule valeur littérale comparée ("1" dans
+# GotoIf($["${VMBOX}"="1"]...)) est protégée par la troncature native
+# du \r de fin de ligne par le parseur config.c. Risque fonctionnel
+# donc nul, confirmé plutôt que supposé. Correctif appliqué malgré
+# tout par cohérence de défense en profondeur avec le reste du projet,
+# à coût nul (dos2unix idempotent) - pas parce qu'un risque a été
+# détecté ici.
 # =====================================================================
 - name: Déploiement du dialplan final Asterisk (extensions.conf + internal.conf)
   hosts: all
@@ -31,7 +45,22 @@
   tasks:
 
     # ---------------------------------------------------------------
-    # 1. Copie de extensions.conf (fichier minimal, #include uniquement)
+    # 1. Dépendance système : dos2unix, nécessaire pour le correctif
+    #    CRLF ci-dessous. Rôle autonome et rejouable indépendamment
+    #    même si dos2unix est déjà installé par un autre rôle.
+    # ---------------------------------------------------------------
+    - name: S'assurer que dos2unix est installé
+      apt:
+        name: dos2unix
+        state: present
+        update_cache: yes
+      register: apt_dos2unix_result
+      retries: 5
+      delay: 15
+      until: apt_dos2unix_result is success
+
+    # ---------------------------------------------------------------
+    # 2. Copie de extensions.conf (fichier minimal, #include uniquement)
     # ---------------------------------------------------------------
     - name: Copier /etc/asterisk/extensions.conf
       copy:
@@ -44,7 +73,7 @@
       register: extensions_conf_copy
 
     # ---------------------------------------------------------------
-    # 2. Copie de internal.conf (le vrai contenu du dialplan)
+    # 3. Copie de internal.conf (le vrai contenu du dialplan)
     # ---------------------------------------------------------------
     - name: Copier /etc/asterisk/internal.conf
       copy:
@@ -56,8 +85,33 @@
         backup: yes
       register: internal_conf_copy
 
+    # =================================================================
+    # 3bis. CORRECTIF CRLF -> LF sur extensions.conf et internal.conf
+    #    (avant le "dialplan reload")
+    # =================================================================
+    - name: "CRLF->LF : convertir extensions.conf et internal.conf"
+      command: "dos2unix {{ item }}"
+      loop:
+        - /etc/asterisk/extensions.conf
+        - /etc/asterisk/internal.conf
+      register: dos2unix_dialplan
+      changed_when: "'converting' in dos2unix_dialplan.stderr"
+
+    - name: "CRLF->LF : vérifier l'absence de \\r résiduel (extensions.conf, internal.conf)"
+      shell: >
+        set -o pipefail;
+        grep -lU $'\r'
+        /etc/asterisk/extensions.conf
+        /etc/asterisk/internal.conf
+        || true
+      args:
+        executable: /bin/bash
+      register: crlf_residual_dialplan_check
+      changed_when: false
+      failed_when: crlf_residual_dialplan_check.stdout | trim | length > 0
+
     # ---------------------------------------------------------------
-    # 3. Reload du dialplan (pas de restart complet nécessaire)
+    # 4. Reload du dialplan (pas de restart complet nécessaire)
     # ---------------------------------------------------------------
     - name: Recharger le dialplan
       command: /usr/sbin/asterisk -rx "dialplan reload"
@@ -69,7 +123,7 @@
         seconds: 2
 
     # ---------------------------------------------------------------
-    # 4. Vérifications finales
+    # 5. Vérifications finales
     # ---------------------------------------------------------------
     - name: "Vérifier le contexte internal (contient tout : _1XXX, _3XXX, 900/960/961/970)"
       command: /usr/sbin/asterisk -rx "dialplan show internal"
@@ -86,6 +140,8 @@
         msg:
           - "--- Contexte internal (_1XXX facturé A2Billing, _3XXX ConfBridge, 900/960/961/970 IVR) ---"
           - "{{ internal_context_check.stdout }}"
+          - "--- Fins de ligne CRLF -> LF sur extensions.conf et internal.conf ---"
+          - "Convertis (dos2unix), aucun \\r résiduel confirmé."
           - "Dialplan rechargé avec succès. Le système VoIP est maintenant entièrement connecté :"
           - "  - Appels internes 1001/1002/1003 -> facturation A2Billing en temps réel"
           - "  - Fallback automatique vers messagerie vocale si occupé/injoignable"
