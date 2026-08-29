@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict 3OvvWT8fZUCt00sfbeFHXDbYq6RE338JAX3iPN3lpZGGBHtFKYdy0NIk4qWlc4c
+\restrict Y4ljLhFaxuHWxbwbnGvgDxjg9Xc2bBxfTH8cPGvlcUjqkSWicvGBuA2lbzSIgBK
 
 -- Dumped from database version 15.19 (Debian 15.19-0+deb12u1)
 -- Dumped by pg_dump version 15.19 (Debian 15.19-0+deb12u1)
@@ -1966,5 +1966,5 @@ ALTER TABLE ONLY public.ivr_options
 -- PostgreSQL database dump complete
 --
 
-\unrestrict 3OvvWT8fZUCt00sfbeFHXDbYq6RE338JAX3iPN3lpZGGBHtFKYdy0NIk4qWlc4c
+\unrestrict Y4ljLhFaxuHWxbwbnGvgDxjg9Xc2bBxfTH8cPGvlcUjqkSWicvGBuA2lbzSIgBK
 
