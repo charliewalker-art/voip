@@ -8,7 +8,7 @@ Vagrant.configure("2") do |config|
   #config.vm.network "private_network", type: "dhcp"
 
   config.vm.provider "virtualbox" do |vb|
-    vb.name   = "Voip3"
+    vb.name   = "Voip"
     vb.memory = "3000"
     vb.cpus   = 1
   end
