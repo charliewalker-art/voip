@@ -69,7 +69,7 @@ Quand c'est fini, on va faire une petite configuration réseau pour accéder à 
 On va mettre le mode accès par pont car c'est conseillé pour que les utilisateurs des numéros puissent se connecter via Linphone, Zoiper ou autre. Ne pas oublier d'éteindre la VM quand on change la configuration de la carte réseau.
 
 Aller dans les paramètres de VirtualBox et mettre le premier adaptateur en accès par pont (et bien sûr, il faut que votre ordinateur soit connecté à un réseau Wi-Fi), comme pour cet exemple :
-`![Bridge VirtualBox](image/bridget%20virtualbox.png)`
+![Bridge VirtualBox](image/bridget%20virtualbox.png)
 
 **4 - Connexion SSH**
 Quand c'est fait, on allume la VM et on se connecte en SSH :
