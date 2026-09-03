@@ -49,7 +49,7 @@ git clone https://github.com/charliewalker-art/voip.git
 Deuxième étape, on va entrer dans le dossier du projet :
 
 ```bash
-cd voip
+cd voip-main
 
 ```
 
